@@ -80,21 +80,21 @@ class Agent {
 }
 const agents = Array.from({length: AGENT_COUNT}, () => new Agent());
 
-// --- Face detection ---
+// --- Object detection (COCO-SSD) ---
 let detectedTargets = [];
+let cocoModel = null;
 async function detectObjects() {
-  if (!video.videoWidth || !video.videoHeight) return;
-  const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions());
-  detectedTargets = detections.map(det => ({
-    x: det.box.x + det.box.width/2,
-    y: det.box.y + det.box.height/2
+  if (!cocoModel || !video.videoWidth || !video.videoHeight) return;
+  const predictions = await cocoModel.detect(video);
+  detectedTargets = predictions.map(obj => ({
+    x: obj.bbox[0] + obj.bbox[2]/2,
+    y: obj.bbox[1] + obj.bbox[3]/2
   }));
 }
-async function loadModels() {
-  await faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights');
-}
-loadModels();
-setInterval(detectObjects, 200);
+cocoSsd.load().then(model => {
+  cocoModel = model;
+  setInterval(detectObjects, 200);
+});
 
 // --- Animation ---
 function draw() {
