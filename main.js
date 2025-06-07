@@ -1,4 +1,3 @@
-// Получаем элементы
 const video = document.getElementById('video');
 const canvas = document.getElementById('overlay');
 const ctx = canvas.getContext('2d');
@@ -56,12 +55,22 @@ async function detectObjects() {
 }
 video.addEventListener('loadeddata', detectObjects);
 
+function getLargestObjects(n) {
+  // Сортируем по площади bbox (самые крупные объекты)
+  return detectedObjects
+    .slice()
+    .sort((a, b) => (b.bbox[2] * b.bbox[3]) - (a.bbox[2] * a.bbox[3]))
+    .slice(0, n);
+}
+
 // Класс для прямоугольника
 class MovingRect {
-  constructor() {
+  constructor(idx) {
+    this.idx = idx;
     this.randomize();
     this.target = {x: this.x, y: this.y};
     this.speed = 1000 + Math.random() * 500;
+    this.targetObjId = null;
   }
   randomize() {
     this.width = Math.random() * 80 + 40;
@@ -71,9 +80,10 @@ class MovingRect {
     this.setNewTarget();
   }
   setNewTarget() {
-    // Если есть объекты — летим к ним
-    if (detectedObjects.length > 0) {
-      const obj = detectedObjects[Math.floor(Math.random() * detectedObjects.length)];
+    // Получаем список самых крупных объектов
+    const largest = getLargestObjects(rects.length);
+    if (largest[this.idx]) {
+      const obj = largest[this.idx];
       const scaleX = canvas.width / video.videoWidth;
       const scaleY = canvas.height / video.videoHeight;
       this.target = {
@@ -92,8 +102,19 @@ class MovingRect {
   }
   move(dt) {
     // Если цель была объект, а он исчез — ищем новую
-    if (this.targetObjId && !detectedObjects.some(obj => (obj.id || obj.bbox.join('-')) === this.targetObjId)) {
+    const largest = getLargestObjects(rects.length);
+    if (this.targetObjId && !largest[this.idx]) {
       this.setNewTarget();
+    }
+    if (this.targetObjId && largest[this.idx]) {
+      const obj = largest[this.idx];
+      const scaleX = canvas.width / video.videoWidth;
+      const scaleY = canvas.height / video.videoHeight;
+      this.target = {
+        x: (obj.bbox[0] + obj.bbox[2]/2) * scaleX - this.width/2,
+        y: (obj.bbox[1] + obj.bbox[3]/2) * scaleY - this.height/2
+      };
+      this.targetObjId = obj.id || obj.bbox.join('-');
     }
     const dx = this.target.x - this.x;
     const dy = this.target.y - this.y;
@@ -107,13 +128,19 @@ class MovingRect {
     this.y += dy / dist * moveDist;
   }
   draw(ctx, t) {
-    // Серый цвет и glow
     ctx.save();
     ctx.shadowColor = 'rgba(180,180,180,0.3)';
     ctx.shadowBlur = 30;
     ctx.strokeStyle = 'rgba(120,120,120,0.8)';
     ctx.lineWidth = 4;
     ctx.strokeRect(this.x, this.y, this.width, this.height);
+    // Подпись memoris
+    ctx.font = `${Math.floor(this.height/3)}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(120,120,120,0.85)';
+    ctx.shadowBlur = 0;
+    ctx.fillText('memoris', this.x + this.width/2, this.y + this.height/2);
     ctx.restore();
   }
   center() {
@@ -125,7 +152,7 @@ class MovingRect {
 }
 
 // Массив прямоугольников
-const rects = Array.from({length: 15}, () => new MovingRect());
+const rects = Array.from({length: 15}, (_,i) => new MovingRect(i));
 
 function randomizeRects() {
   for (const r of rects) r.randomize();
