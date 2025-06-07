@@ -143,6 +143,7 @@ let yoloClasses = [
   'person','bicycle','car','motorcycle','airplane','bus','train','truck','boat','traffic light','fire hydrant','stop sign','parking meter','bench','bird','cat','dog','horse','sheep','cow','elephant','bear','zebra','giraffe','backpack','umbrella','handbag','tie','suitcase','frisbee','skis','snowboard','sports ball','kite','baseball bat','baseball glove','skateboard','surfboard','tennis racket','bottle','wine glass','cup','fork','knife','spoon','bowl','banana','apple','sandwich','orange','broccoli','carrot','hot dog','pizza','donut','cake','chair','couch','potted plant','bed','dining table','toilet','tv','laptop','mouse','remote','keyboard','cell phone','microwave','oven','toaster','sink','refrigerator','book','clock','vase','scissors','teddy bear','hair drier','toothbrush'
 ];
 let detectedBboxes = [];
+let detectedBboxLabels = [];
 
 async function loadYolo() {
   yoloSession = await ort.InferenceSession.create(YOLO_MODEL_URL);
@@ -176,13 +177,13 @@ async function detectYoloObjects() {
   const bboxes = [];
   for (let i = 0; i < numDet; i++) {
     const conf = output[i * 84 + 4];
-    if (conf < 0.35) continue;
+    if (conf < 0.2) continue; // порог ниже
     let maxClass = 0, maxScore = 0;
     for (let c = 0; c < 80; c++) {
       const score = output[i * 84 + 5 + c];
       if (score > maxScore) { maxScore = score; maxClass = c; }
     }
-    if (maxScore * conf < 0.35) continue;
+    if (maxScore * conf < 0.2) continue;
     // YOLOv8: x,y,w,h - center, scale 0..1 (relative to 640)
     let x = output[i * 84 + 0] * (video.videoWidth / 640);
     let y = output[i * 84 + 1] * (video.videoHeight / 640);
@@ -196,6 +197,7 @@ async function detectYoloObjects() {
     });
   }
   detectedBboxes = bboxes.map(b => b.bbox);
+  detectedBboxLabels = bboxes.map(b => ({bbox: b.bbox, label: b.class, conf: b.conf}));
   return bboxes.map(b => ({x: b.center.x, y: b.center.y}));
 }
 
@@ -269,47 +271,60 @@ video.addEventListener('play', () => {
 // --- Animation ---
 function draw() {
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  // Линии — ярко-белые
+  // Линии — плавные кривые, ярко-белые
   ctx.save();
   ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 1.5;
-  for (let i = 0; i < agents.length; i++) {
-    if (!agents[i].visible) continue;
-    const a = agents[i];
+  ctx.lineWidth = 2;
+  let visibleAgents = agents.filter(a => a.visible);
+  for (let i = 0; i < visibleAgents.length; i++) {
+    const a = visibleAgents[i];
     const ca = a.center();
-    for (let j = i+1; j < agents.length; j++) {
-      if (!agents[j].visible) continue;
-      const b = agents[j];
+    // Кривые к ближайшим агентам
+    let neighbors = [];
+    for (let j = 0; j < visibleAgents.length; j++) {
+      if (i === j) continue;
+      const b = visibleAgents[j];
       const cb = b.center();
       const dx = ca.x - cb.x, dy = ca.y - cb.y;
       const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < LINK_DIST) {
-        ctx.beginPath();
-        ctx.moveTo(ca.x, ca.y);
-        ctx.lineTo(cb.x, cb.y);
-        ctx.stroke();
-      }
+      if (dist < LINK_DIST) neighbors.push(cb);
+    }
+    neighbors = neighbors.slice(0, 2); // максимум 2 кривых
+    for (const cb of neighbors) {
+      ctx.beginPath();
+      ctx.moveTo(ca.x, ca.y);
+      // Кривая Безье: контрольная точка — середина между агентами, смещённая вверх
+      const mx = (ca.x + cb.x) / 2;
+      const my = (ca.y + cb.y) / 2 - 20;
+      ctx.quadraticCurveTo(mx, my, cb.x, cb.y);
+      ctx.stroke();
     }
   }
   ctx.restore();
-  // Квадраты — ярко-белые с glow
-  ctx.save();
-  ctx.strokeStyle = '#fff';
-  ctx.shadowColor = '#fff';
-  ctx.shadowBlur = 12;
-  ctx.lineWidth = 3;
+  // Квадраты — градиент и glow
   for (const agent of agents) {
     if (!agent.visible) continue;
-    ctx.globalAlpha = 1;
+    const grad = ctx.createLinearGradient(agent.x, agent.y, agent.x + AGENT_SIZE, agent.y + AGENT_SIZE);
+    grad.addColorStop(0, '#fff');
+    grad.addColorStop(1, '#aaf');
+    ctx.save();
+    ctx.strokeStyle = grad;
+    ctx.shadowColor = '#fff';
+    ctx.shadowBlur = 18;
+    ctx.lineWidth = 4;
+    ctx.globalAlpha = 0.95;
     ctx.strokeRect(agent.x, agent.y, AGENT_SIZE, AGENT_SIZE);
+    ctx.restore();
   }
-  ctx.restore();
-  // Визуализация bbox-ов (зелёные прямоугольники)
+  // Визуализация bbox-ов (зелёные прямоугольники + подписи)
   ctx.save();
   ctx.strokeStyle = 'lime';
   ctx.lineWidth = 2;
-  for (const bbox of detectedBboxes) {
-    ctx.strokeRect(bbox[0], bbox[1], bbox[2], bbox[3]);
+  ctx.font = '18px Arial';
+  ctx.fillStyle = 'lime';
+  for (const b of detectedBboxLabels) {
+    ctx.strokeRect(b.bbox[0], b.bbox[1], b.bbox[2], b.bbox[3]);
+    ctx.fillText(`${b.label} (${(b.conf*100).toFixed(0)}%)`, b.bbox[0]+2, b.bbox[1]+18);
   }
   ctx.restore();
 }
