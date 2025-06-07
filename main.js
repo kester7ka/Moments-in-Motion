@@ -22,78 +22,62 @@ navigator.mediaDevices.getUserMedia({video: { facingMode: 'environment' }, audio
   .catch(e => alert('Нет доступа к камере: ' + e));
 
 // --- Agent (square) setup ---
-const AGENT_SIZE = 10;
-const AGENT_COUNT = 50;
+const AGENT_COUNT = 40;
+const AGENT_SIZE = 22;
 const LINK_DIST = 80;
-const AGENT_SPEED = 400; // px/sec, плавно
-const AGENT_REPEL_DIST = 18; // минимальное расстояние между агентами
-const AGENT_REPEL_FORCE = 4000; // сила отталкивания
 const MAX_AGENTS_PER_TARGET = 15;
 
-class Agent {
-  constructor() {
-    this.x = Math.random() * (canvas.width - AGENT_SIZE);
-    this.y = Math.random() * (canvas.height - AGENT_SIZE);
-    this.vx = 0;
-    this.vy = 0;
-    this.target = null;
-    this.visible = true;
-  }
-  moveSmart(target, dt, agents) {
-    let fx = 0, fy = 0;
-    // Притяжение к цели (плавно, без телепортации)
-    if (target) {
-      const tx = target.x - AGENT_SIZE/2;
-      const ty = target.y - AGENT_SIZE/2;
-      const dx = tx - this.x;
-      const dy = ty - this.y;
-      const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist > 1) {
-        // Плавное движение: ограничиваем максимальное перемещение за кадр
-        const maxStep = AGENT_SPEED * dt;
-        if (dist < maxStep) {
-          this.x = tx;
-          this.y = ty;
-        } else {
-          this.x += (dx / dist) * maxStep;
-          this.y += (dy / dist) * maxStep;
-        }
-      }
-    } else {
-      // хаотичное движение
-      fx += (Math.random() - 0.5) * 200;
-      fy += (Math.random() - 0.5) * 200;
-      const len = Math.sqrt(fx*fx + fy*fy);
-      if (len > AGENT_SPEED) {
-        fx = fx / len * AGENT_SPEED;
-        fy = fy / len * AGENT_SPEED;
-      }
-      this.x += fx * dt;
-      this.y += fy * dt;
-    }
-    // Отталкивание от других агентов
-    for (const other of agents) {
-      if (other === this) continue;
-      const dx = this.x - other.x;
-      const dy = this.y - other.y;
-      const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < AGENT_REPEL_DIST && dist > 0.1) {
-        const force = AGENT_REPEL_FORCE / (dist * dist);
-        this.x += (dx / dist) * force * dt * 0.5;
-        this.y += (dy / dist) * force * dt * 0.5;
-      }
-    }
-    // Границы
-    if (this.x < 0) this.x = 0;
-    if (this.x > canvas.width - AGENT_SIZE) this.x = canvas.width - AGENT_SIZE;
-    if (this.y < 0) this.y = 0;
-    if (this.y > canvas.height - AGENT_SIZE) this.y = canvas.height - AGENT_SIZE;
-  }
-  center() {
-    return {x: this.x + AGENT_SIZE/2, y: this.y + AGENT_SIZE/2};
+const agentsDiv = document.getElementById('agents');
+let agentDivs = [];
+function createAgentDivs() {
+  agentsDiv.innerHTML = '';
+  agentDivs = [];
+  for (let i = 0; i < AGENT_COUNT; i++) {
+    const d = document.createElement('div');
+    d.className = 'agent';
+    d.style.left = '-100px';
+    d.style.top = '-100px';
+    agentsDiv.appendChild(d);
+    agentDivs.push(d);
   }
 }
-const agents = Array.from({length: AGENT_COUNT}, () => new Agent());
+createAgentDivs();
+
+class Agent {
+  constructor(idx) {
+    this.idx = idx;
+    this.x = Math.random() * (canvas.width - AGENT_SIZE);
+    this.y = Math.random() * (canvas.height - AGENT_SIZE);
+    this.visible = true;
+  }
+  moveTo(target, speed, dt) {
+    if (!target) return;
+    const dx = target.x - (this.x + AGENT_SIZE/2);
+    const dy = target.y - (this.y + AGENT_SIZE/2);
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const maxStep = speed * dt;
+    if (dist < maxStep) {
+      this.x = target.x - AGENT_SIZE/2;
+      this.y = target.y - AGENT_SIZE/2;
+    } else {
+      this.x += (dx / dist) * maxStep;
+      this.y += (dy / dist) * maxStep;
+    }
+  }
+  updateDOM() {
+    const d = agentDivs[this.idx];
+    if (this.visible) {
+      d.style.left = this.x + 'px';
+      d.style.top = this.y + 'px';
+      d.style.opacity = '0.95';
+    } else {
+      d.style.left = '-100px';
+      d.style.top = '-100px';
+      d.style.opacity = '0';
+    }
+  }
+}
+let agents = Array.from({length: AGENT_COUNT}, (_,i) => new Agent(i));
 
 // --- Object detection (COCO-SSD) + MediaPipe Hands ---
 let detectedTargets = [];
@@ -268,124 +252,123 @@ video.addEventListener('play', () => {
   requestAnimationFrame(checkVideoFrame);
 });
 
+// --- MediaPipe Pose ---
+let pose = null;
+let poseKeypoints = [];
+function setupPose() {
+  pose = new window.Pose({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+  });
+  pose.setOptions({
+    modelComplexity: 1,
+    smoothLandmarks: true,
+    enableSegmentation: false,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+  pose.onResults((results) => {
+    poseKeypoints = [];
+    if (results.poseLandmarks) {
+      for (const lm of results.poseLandmarks) {
+        poseKeypoints.push({
+          x: lm.x * canvas.width,
+          y: lm.y * canvas.height
+        });
+      }
+    }
+  });
+}
+setupPose();
+async function detectPose() {
+  if (video.videoWidth && video.videoHeight && pose) {
+    await pose.send({image: video});
+  }
+}
+setInterval(detectPose, 120);
+
 // --- Animation ---
-function draw() {
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  // Линии — плавные кривые, ярко-белые
+function drawLines() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Линии между видимыми агентами
   ctx.save();
-  ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 1.1;
+  ctx.globalAlpha = 0.8;
+  ctx.setLineDash([]);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.imageSmoothingEnabled = true;
   let visibleAgents = agents.filter(a => a.visible);
   for (let i = 0; i < visibleAgents.length; i++) {
     const a = visibleAgents[i];
-    const ca = a.center();
-    // Кривые к ближайшим агентам
-    let neighbors = [];
-    for (let j = 0; j < visibleAgents.length; j++) {
-      if (i === j) continue;
+    const ca = {x: a.x + AGENT_SIZE/2, y: a.y + AGENT_SIZE/2};
+    for (let j = i+1; j < visibleAgents.length; j++) {
       const b = visibleAgents[j];
-      const cb = b.center();
+      const cb = {x: b.x + AGENT_SIZE/2, y: b.y + AGENT_SIZE/2};
       const dx = ca.x - cb.x, dy = ca.y - cb.y;
       const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < LINK_DIST) neighbors.push(cb);
-    }
-    neighbors = neighbors.slice(0, 2); // максимум 2 кривых
-    for (const cb of neighbors) {
-      ctx.beginPath();
-      ctx.moveTo(ca.x, ca.y);
-      // Кривая Безье: контрольная точка — середина между агентами, смещённая вверх
-      const mx = (ca.x + cb.x) / 2;
-      const my = (ca.y + cb.y) / 2 - 20;
-      ctx.quadraticCurveTo(mx, my, cb.x, cb.y);
-      ctx.stroke();
+      if (dist < LINK_DIST) {
+        ctx.beginPath();
+        ctx.moveTo(ca.x, ca.y);
+        ctx.lineTo(cb.x, cb.y);
+        ctx.stroke();
+      }
     }
   }
   ctx.restore();
-  // Квадраты — градиент и glow
-  for (const agent of agents) {
-    if (!agent.visible) continue;
-    const grad = ctx.createLinearGradient(agent.x, agent.y, agent.x + AGENT_SIZE, agent.y + AGENT_SIZE);
-    grad.addColorStop(0, '#fff');
-    grad.addColorStop(1, '#aaf');
-    ctx.save();
-    ctx.strokeStyle = grad;
-    ctx.shadowColor = '#fff';
-    ctx.shadowBlur = 18;
-    ctx.lineWidth = 4;
-    ctx.globalAlpha = 0.95;
-    ctx.strokeRect(agent.x, agent.y, AGENT_SIZE, AGENT_SIZE);
-    ctx.restore();
-  }
-  // Визуализация bbox-ов (зелёные прямоугольники + подписи)
+  // Визуализация bbox-ов (зелёные прямоугольники)
   ctx.save();
   ctx.strokeStyle = 'lime';
-  ctx.lineWidth = 2;
-  ctx.font = '18px Arial';
-  ctx.fillStyle = 'lime';
-  for (const b of detectedBboxLabels) {
-    ctx.strokeRect(b.bbox[0], b.bbox[1], b.bbox[2], b.bbox[3]);
-    ctx.fillText(`${b.label} (${(b.conf*100).toFixed(0)}%)`, b.bbox[0]+2, b.bbox[1]+18);
+  ctx.lineWidth = 1.5;
+  for (const bbox of detectedBboxes) {
+    ctx.strokeRect(bbox[0], bbox[1], bbox[2], bbox[3]);
   }
   ctx.restore();
 }
 
 function animate() {
-  // Распределяем агентов по landmark-ам руки, если они есть
-  let handLandmarks = (handsResults && handsResults.length >= 5) ? handsResults : null;
   let now = performance.now();
-  let targetFps = Math.max(30, Math.min(60, Math.round(measuredVideoFps)));
-  let dt = 1 / targetFps;
-  animate.lastTime = now;
-
-  // Скрываем всех агентов по умолчанию
-  for (const agent of agents) agent.visible = false;
-
+  let dt = 1/60;
+  // Распределяем агентов по keypoints позы, если есть
   let used = 0;
-  if (handLandmarks && handLandmarks.length > 0) {
-    // Landmark-ы руки: максимум по одному агенту на landmark
-    let n = Math.min(handLandmarks.length, agents.length);
+  for (const a of agents) a.visible = false;
+  if (poseKeypoints && poseKeypoints.length >= 10) {
+    let n = Math.min(poseKeypoints.length, agents.length);
     for (let i = 0; i < n; i++, used++) {
-      agents[used].moveSmart(handLandmarks[i], dt, agents);
+      agents[used].moveTo(poseKeypoints[i], 1400, dt);
+      agents[used].visible = true;
+    }
+  } else if (handsResults && handsResults.length > 0) {
+    let n = Math.min(handsResults.length, agents.length);
+    for (let i = 0; i < n; i++, used++) {
+      agents[used].moveTo(handsResults[i], 1200, dt);
       agents[used].visible = true;
     }
   } else if (detectedTargets.length > 0 && detectedBboxes.length === detectedTargets.length) {
-    // Для bbox-целей (объекты) — агенты по периметру bbox
     for (let t = 0; t < detectedTargets.length; t++) {
       let bbox = detectedBboxes[t];
       let n = Math.min(MAX_AGENTS_PER_TARGET, agents.length - used);
       if (n <= 0) break;
-      // Периметр прямоугольника
       let perim = 2 * (bbox[2] + bbox[3]);
       for (let k = 0; k < n; k++, used++) {
         let p = (perim * k) / n;
         let tx, ty;
-        if (p < bbox[2]) { // верхняя грань
-          tx = bbox[0] + p;
-          ty = bbox[1];
-        } else if (p < bbox[2] + bbox[3]) { // правая грань
-          tx = bbox[0] + bbox[2];
-          ty = bbox[1] + (p - bbox[2]);
-        } else if (p < bbox[2] + bbox[3] + bbox[2]) { // нижняя грань
-          tx = bbox[0] + bbox[2] - (p - bbox[2] - bbox[3]);
-          ty = bbox[1] + bbox[3];
-        } else { // левая грань
-          tx = bbox[0];
-          ty = bbox[1] + bbox[3] - (p - bbox[2] - bbox[3] - bbox[2]);
-        }
-        agents[used].moveSmart({x: tx, y: ty}, dt, agents);
+        if (p < bbox[2]) { tx = bbox[0] + p; ty = bbox[1]; }
+        else if (p < bbox[2] + bbox[3]) { tx = bbox[0] + bbox[2]; ty = bbox[1] + (p - bbox[2]); }
+        else if (p < bbox[2] + bbox[3] + bbox[2]) { tx = bbox[0] + bbox[2] - (p - bbox[2] - bbox[3]); ty = bbox[1] + bbox[3]; }
+        else { tx = bbox[0]; ty = bbox[1] + bbox[3] - (p - bbox[2] - bbox[3] - bbox[2]); }
+        agents[used].moveTo({x: tx, y: ty}, 1200, dt);
         agents[used].visible = true;
       }
     }
   }
-  // Остальные агенты скрываем (перемещаем за пределы canvas)
   for (; used < agents.length; used++) {
-    agents[used].x = -1000;
-    agents[used].y = -1000;
     agents[used].visible = false;
   }
-  draw();
+  for (const a of agents) a.updateDOM();
+  drawLines();
   requestAnimationFrame(animate);
 }
 video.addEventListener('playing', () => {
   requestAnimationFrame(animate);
-}); 
+});
