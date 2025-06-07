@@ -135,24 +135,75 @@ async function detectHands() {
   }
 }
 
-// Для bbox-целей (объекты) — распределяем агентов по периметру bbox
-// Для этого нужно сохранять bbox из Coco-SSD
+// --- YOLOv8 через onnxruntime-web ---
+const YOLO_MODEL_URL = 'https://huggingface.co/onnx/models/resolve/main/yolov8n.onnx';
+let yoloSession = null;
+let yoloInputShape = [1, 3, 640, 640]; // [batch, channels, height, width]
+let yoloClasses = [
+  'person','bicycle','car','motorcycle','airplane','bus','train','truck','boat','traffic light','fire hydrant','stop sign','parking meter','bench','bird','cat','dog','horse','sheep','cow','elephant','bear','zebra','giraffe','backpack','umbrella','handbag','tie','suitcase','frisbee','skis','snowboard','sports ball','kite','baseball bat','baseball glove','skateboard','surfboard','tennis racket','bottle','wine glass','cup','fork','knife','spoon','bowl','banana','apple','sandwich','orange','broccoli','carrot','hot dog','pizza','donut','cake','chair','couch','potted plant','bed','dining table','toilet','tv','laptop','mouse','remote','keyboard','cell phone','microwave','oven','toaster','sink','refrigerator','book','clock','vase','scissors','teddy bear','hair drier','toothbrush'
+];
 let detectedBboxes = [];
-async function detectObjects() {
-  if (!cocoModel || !video.videoWidth || !video.videoHeight) return;
-  const predictions = await cocoModel.detect(video);
-  detectedBboxes = predictions.map(obj => obj.bbox); // [x, y, w, h]
-  return predictions.map(obj => ({
-    x: obj.bbox[0] + obj.bbox[2]/2,
-    y: obj.bbox[1] + obj.bbox[3]/2
-  }));
+
+async function loadYolo() {
+  yoloSession = await ort.InferenceSession.create(YOLO_MODEL_URL);
+}
+loadYolo();
+
+function preprocessYoloInput(video) {
+  // Resize video to 640x640, normalize, NCHW
+  const off = document.createElement('canvas');
+  off.width = 640; off.height = 640;
+  const octx = off.getContext('2d');
+  octx.drawImage(video, 0, 0, 640, 640);
+  const imgData = octx.getImageData(0, 0, 640, 640).data;
+  const input = new Float32Array(1 * 3 * 640 * 640);
+  for (let i = 0; i < 640 * 640; i++) {
+    input[i] = imgData[i * 4] / 255; // R
+    input[i + 640 * 640] = imgData[i * 4 + 1] / 255; // G
+    input[i + 2 * 640 * 640] = imgData[i * 4 + 2] / 255; // B
+  }
+  return new ort.Tensor('float32', input, yoloInputShape);
+}
+
+async function detectYoloObjects() {
+  if (!yoloSession || !video.videoWidth || !video.videoHeight) return [];
+  const inputTensor = preprocessYoloInput(video);
+  const feeds = { images: inputTensor };
+  const results = await yoloSession.run(feeds);
+  // YOLOv8n.onnx output: 'output0' [1, N, 84] (x, y, w, h, conf, 80 class scores)
+  const output = results[Object.keys(results)[0]].data;
+  const numDet = output.length / 84;
+  const bboxes = [];
+  for (let i = 0; i < numDet; i++) {
+    const conf = output[i * 84 + 4];
+    if (conf < 0.35) continue;
+    let maxClass = 0, maxScore = 0;
+    for (let c = 0; c < 80; c++) {
+      const score = output[i * 84 + 5 + c];
+      if (score > maxScore) { maxScore = score; maxClass = c; }
+    }
+    if (maxScore * conf < 0.35) continue;
+    // YOLOv8: x,y,w,h - center, scale 0..1 (relative to 640)
+    let x = output[i * 84 + 0] * (video.videoWidth / 640);
+    let y = output[i * 84 + 1] * (video.videoHeight / 640);
+    let w = output[i * 84 + 2] * (video.videoWidth / 640);
+    let h = output[i * 84 + 3] * (video.videoHeight / 640);
+    bboxes.push({
+      bbox: [x - w/2, y - h/2, w, h],
+      class: yoloClasses[maxClass],
+      conf: conf * maxScore,
+      center: {x, y}
+    });
+  }
+  detectedBboxes = bboxes.map(b => b.bbox);
+  return bboxes.map(b => ({x: b.center.x, y: b.center.y}));
 }
 
 // Объединяем все цели
 async function updateTargets() {
   if (detectToggle) {
-    const cocoTargets = await detectObjects() || [];
-    detectedTargets = cocoTargets;
+    const yoloTargets = await detectYoloObjects() || [];
+    detectedTargets = yoloTargets;
   } else {
     await detectHands();
     if (handsResults && handsResults.length > 0) {
@@ -253,16 +304,12 @@ function draw() {
     ctx.strokeRect(agent.x, agent.y, AGENT_SIZE, AGENT_SIZE);
   }
   ctx.restore();
-  // Временно: landmark-и руки (синие кружки)
+  // Визуализация bbox-ов (зелёные прямоугольники)
   ctx.save();
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = 'blue';
-  if (handsResults && handsResults.length > 0) {
-    for (const lm of handsResults) {
-      ctx.beginPath();
-      ctx.arc(lm.x, lm.y, 6, 0, 2*Math.PI);
-      ctx.fill();
-    }
+  ctx.strokeStyle = 'lime';
+  ctx.lineWidth = 2;
+  for (const bbox of detectedBboxes) {
+    ctx.strokeRect(bbox[0], bbox[1], bbox[2], bbox[3]);
   }
   ctx.restore();
 }
@@ -281,7 +328,7 @@ function animate() {
   let used = 0;
   if (handLandmarks && handLandmarks.length > 0) {
     // Landmark-ы руки: максимум по одному агенту на landmark
-    let n = Math.min(handLandmarks.length, agents.length, MAX_AGENTS_PER_TARGET);
+    let n = Math.min(handLandmarks.length, agents.length);
     for (let i = 0; i < n; i++, used++) {
       agents[used].moveSmart(handLandmarks[i], dt, agents);
       agents[used].visible = true;
