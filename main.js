@@ -11,10 +11,10 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-let currentFacing = 'user'; // 'user' (front) или 'environment' (back)
+let currentFacing = 'environment'; // только задняя
 let stream = null;
 
-function startCamera(facingMode = 'user') {
+function startCamera(facingMode = 'environment') {
   if (stream) {
     stream.getTracks().forEach(track => track.stop());
   }
@@ -29,23 +29,6 @@ function startCamera(facingMode = 'user') {
 }
 
 startCamera(currentFacing);
-
-// Обработка двойного тапа
-let lastTap = 0;
-window.addEventListener('touchend', function(e) {
-  const now = Date.now();
-  if (now - lastTap < 300) {
-    // Двойной тап
-    currentFacing = currentFacing === 'user' ? 'environment' : 'user';
-    startCamera(currentFacing);
-  }
-  lastTap = now;
-});
-// Для ПК — двойной клик мышью
-window.addEventListener('dblclick', function(e) {
-  currentFacing = currentFacing === 'user' ? 'environment' : 'user';
-  startCamera(currentFacing);
-});
 
 let detectedObjects = [];
 let model = null;
@@ -79,7 +62,6 @@ class MovingRect {
     this.randomize();
     this.target = {x: this.x, y: this.y};
     this.speed = 1000 + Math.random() * 500;
-    this.colorPhase = Math.random() * Math.PI * 2;
   }
   randomize() {
     this.width = Math.random() * 80 + 40;
@@ -92,22 +74,27 @@ class MovingRect {
     // Если есть объекты — летим к ним
     if (detectedObjects.length > 0) {
       const obj = detectedObjects[Math.floor(Math.random() * detectedObjects.length)];
-      // Переводим координаты из видео в canvas
       const scaleX = canvas.width / video.videoWidth;
       const scaleY = canvas.height / video.videoHeight;
       this.target = {
         x: (obj.bbox[0] + obj.bbox[2]/2) * scaleX - this.width/2,
         y: (obj.bbox[1] + obj.bbox[3]/2) * scaleY - this.height/2
       };
+      this.targetObjId = obj.id || obj.bbox.join('-');
     } else {
       this.target = {
         x: Math.random() * (canvas.width - this.width),
         y: Math.random() * (canvas.height - this.height)
       };
+      this.targetObjId = null;
     }
     this.speed = 1000 + Math.random() * 500;
   }
   move(dt) {
+    // Если цель была объект, а он исчез — ищем новую
+    if (this.targetObjId && !detectedObjects.some(obj => (obj.id || obj.bbox.join('-')) === this.targetObjId)) {
+      this.setNewTarget();
+    }
     const dx = this.target.x - this.x;
     const dy = this.target.y - this.y;
     const dist = Math.sqrt(dx*dx + dy*dy);
@@ -120,16 +107,12 @@ class MovingRect {
     this.y += dy / dist * moveDist;
   }
   draw(ctx, t) {
-    // TouchDesigner-стиль: плавный цвет и glow
-    const glowColor = `rgba(0,255,255,0.2)`;
+    // Серый цвет и glow
     ctx.save();
-    ctx.shadowColor = glowColor;
+    ctx.shadowColor = 'rgba(180,180,180,0.3)';
     ctx.shadowBlur = 30;
-    const r = Math.floor(120 + 120 * Math.sin(t/500 + this.colorPhase));
-    const g = Math.floor(120 + 120 * Math.sin(t/700 + this.colorPhase + 1));
-    const b = Math.floor(120 + 120 * Math.sin(t/900 + this.colorPhase + 2));
-    ctx.strokeStyle = `rgba(${r},${g},${b},0.8)`;
-    ctx.lineWidth = 3 + 2 * Math.sin(t/300 + this.colorPhase);
+    ctx.strokeStyle = 'rgba(120,120,120,0.8)';
+    ctx.lineWidth = 4;
     ctx.strokeRect(this.x, this.y, this.width, this.height);
     ctx.restore();
   }
