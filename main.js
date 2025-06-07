@@ -26,6 +26,7 @@ const LINK_DIST = 80;
 const AGENT_SPEED = 1000; // px/sec, очень быстро
 const AGENT_REPEL_DIST = 18; // минимальное расстояние между агентами
 const AGENT_REPEL_FORCE = 4000; // сила отталкивания
+const MAX_AGENTS_PER_TARGET = 15;
 
 class Agent {
   constructor() {
@@ -34,6 +35,7 @@ class Agent {
     this.vx = 0;
     this.vy = 0;
     this.target = null;
+    this.visible = true;
   }
   moveSmart(target, dt, agents) {
     let fx = 0, fy = 0;
@@ -151,14 +153,16 @@ if (window.tf && tf.setBackend) tf.setBackend('webgl');
 // --- Animation ---
 function draw() {
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  // Линии
+  // Линии — ярко-белые
   ctx.save();
-  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.strokeStyle = '#fff';
   ctx.lineWidth = 1.5;
   for (let i = 0; i < agents.length; i++) {
+    if (!agents[i].visible) continue;
     const a = agents[i];
     const ca = a.center();
     for (let j = i+1; j < agents.length; j++) {
+      if (!agents[j].visible) continue;
       const b = agents[j];
       const cb = b.center();
       const dx = ca.x - cb.x, dy = ca.y - cb.y;
@@ -179,6 +183,7 @@ function draw() {
   ctx.shadowBlur = 12;
   ctx.lineWidth = 3;
   for (const agent of agents) {
+    if (!agent.visible) continue;
     ctx.globalAlpha = 1;
     ctx.strokeRect(agent.x, agent.y, AGENT_SIZE, AGENT_SIZE);
   }
@@ -198,29 +203,46 @@ function draw() {
 function animate() {
   // Распределяем агентов по landmark-ам руки, если они есть
   let handLandmarks = (handsResults && handsResults.length >= 5) ? handsResults : null;
-  let targets = null;
-  if (handLandmarks) {
-    targets = handLandmarks;
-  } else if (detectedTargets.length > 0) {
-    targets = detectedTargets;
-  }
   let now = performance.now();
   let dt = (typeof animate.lastTime === 'number') ? (now - animate.lastTime) / 1000 : 0.016;
   animate.lastTime = now;
 
-  if (targets && targets.length > 0) {
-    // Если целей мало, часть агентов двигается хаотично
-    let n = Math.min(targets.length, agents.length);
-    for (let i = 0; i < n; i++) {
-      agents[i].moveSmart(targets[i], dt, agents);
+  // Скрываем всех агентов по умолчанию
+  for (const agent of agents) agent.visible = false;
+
+  let used = 0;
+  if (handLandmarks && handLandmarks.length > 0) {
+    // Landmark-ы руки: максимум по одному агенту на landmark
+    let n = Math.min(handLandmarks.length, agents.length, MAX_AGENTS_PER_TARGET);
+    for (let i = 0; i < n; i++, used++) {
+      agents[used].moveSmart(handLandmarks[i], dt, agents);
+      agents[used].visible = true;
     }
-    for (let i = n; i < agents.length; i++) {
-      agents[i].moveSmart(null, dt, agents);
+  } else if (detectedTargets.length > 0) {
+    // Для bbox-целей (объекты) — вычисляем нужное число агентов по размеру bbox
+    for (let t = 0; t < detectedTargets.length; t++) {
+      // Для COCO-SSD bbox-ы не сохраняются, поэтому вычислим примерный размер по соседним целям
+      // (или можно доработать детекцию, чтобы сохранять bbox)
+      // Здесь просто используем фиксированный радиус
+      let center = detectedTargets[t];
+      let n = Math.min(MAX_AGENTS_PER_TARGET, agents.length - used);
+      if (n <= 0) break;
+      // Можно сделать n пропорциональным размеру объекта, если есть bbox
+      let radius = 30;
+      for (let k = 0; k < n; k++, used++) {
+        let angle = (2 * Math.PI * k) / n;
+        let tx = center.x + Math.cos(angle) * radius;
+        let ty = center.y + Math.sin(angle) * radius;
+        agents[used].moveSmart({x: tx, y: ty}, dt, agents);
+        agents[used].visible = true;
+      }
     }
-  } else {
-    for (let i = 0; i < agents.length; i++) {
-      agents[i].moveSmart(null, dt, agents);
-    }
+  }
+  // Остальные агенты скрываем (перемещаем за пределы canvas)
+  for (; used < agents.length; used++) {
+    agents[used].x = -1000;
+    agents[used].y = -1000;
+    agents[used].visible = false;
   }
   draw();
   requestAnimationFrame(animate);
