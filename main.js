@@ -1,3 +1,4 @@
+// Получаем элементы
 const video = document.getElementById('video');
 const canvas = document.getElementById('overlay');
 const ctx = canvas.getContext('2d');
@@ -71,37 +72,44 @@ class MovingRect {
     this.target = {x: this.x, y: this.y};
     this.speed = 1000 + Math.random() * 500;
     this.targetObjId = null;
+    this.isObject = false;
+    this.width = 60;
+    this.height = 60;
   }
   randomize() {
-    this.width = Math.random() * 80 + 40;
-    this.height = Math.random() * 80 + 40;
+    this.width = 40 + Math.random() * 80;
+    this.height = 40 + Math.random() * 80;
     this.x = Math.random() * (canvas.width - this.width);
     this.y = Math.random() * (canvas.height - this.height);
     this.setNewTarget();
   }
   setNewTarget() {
-    // Получаем список самых крупных объектов
     const largest = getLargestObjects(rects.length);
     if (largest[this.idx]) {
       const obj = largest[this.idx];
       const scaleX = canvas.width / video.videoWidth;
       const scaleY = canvas.height / video.videoHeight;
       this.target = {
-        x: (obj.bbox[0] + obj.bbox[2]/2) * scaleX - this.width/2,
-        y: (obj.bbox[1] + obj.bbox[3]/2) * scaleY - this.height/2
+        x: obj.bbox[0] * scaleX,
+        y: obj.bbox[1] * scaleY
       };
+      this.width = obj.bbox[2] * scaleX;
+      this.height = obj.bbox[3] * scaleY;
       this.targetObjId = obj.id || obj.bbox.join('-');
+      this.isObject = true;
     } else {
       this.target = {
         x: Math.random() * (canvas.width - this.width),
         y: Math.random() * (canvas.height - this.height)
       };
+      this.width = 40 + Math.random() * 80;
+      this.height = 40 + Math.random() * 80;
       this.targetObjId = null;
+      this.isObject = false;
     }
     this.speed = 1000 + Math.random() * 500;
   }
   move(dt) {
-    // Если цель была объект, а он исчез — ищем новую
     const largest = getLargestObjects(rects.length);
     if (this.targetObjId && !largest[this.idx]) {
       this.setNewTarget();
@@ -111,10 +119,15 @@ class MovingRect {
       const scaleX = canvas.width / video.videoWidth;
       const scaleY = canvas.height / video.videoHeight;
       this.target = {
-        x: (obj.bbox[0] + obj.bbox[2]/2) * scaleX - this.width/2,
-        y: (obj.bbox[1] + obj.bbox[3]/2) * scaleY - this.height/2
+        x: obj.bbox[0] * scaleX,
+        y: obj.bbox[1] * scaleY
       };
+      this.width = obj.bbox[2] * scaleX;
+      this.height = obj.bbox[3] * scaleY;
       this.targetObjId = obj.id || obj.bbox.join('-');
+      this.isObject = true;
+    } else if (!this.targetObjId) {
+      this.isObject = false;
     }
     const dx = this.target.x - this.x;
     const dy = this.target.y - this.y;
@@ -129,16 +142,16 @@ class MovingRect {
   }
   draw(ctx, t) {
     ctx.save();
-    ctx.shadowColor = 'rgba(180,180,180,0.3)';
+    ctx.shadowColor = 'rgba(255,255,255,0.3)';
     ctx.shadowBlur = 30;
-    ctx.strokeStyle = 'rgba(120,120,120,0.8)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
     ctx.lineWidth = 4;
     ctx.strokeRect(this.x, this.y, this.width, this.height);
     // Подпись memoris
     ctx.font = `${Math.floor(this.height/3)}px Arial`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(120,120,120,0.85)';
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
     ctx.shadowBlur = 0;
     ctx.fillText('memoris', this.x + this.width/2, this.y + this.height/2);
     ctx.restore();
@@ -165,19 +178,27 @@ function animate(now) {
   const dt = Math.min((now - lastTime) / 1000, 0.05);
   lastTime = now;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // TouchDesigner-стиль: динамичные линии
+  // Линии между квадратами: случайно прямые или кривые
   ctx.save();
   for (let i = 0; i < rects.length; i++) {
     for (let j = i + 1; j < rects.length; j++) {
       const c1 = rects[i].center();
       const c2 = rects[j].center();
       ctx.beginPath();
-      ctx.moveTo(c1.x, c1.y);
-      ctx.lineTo(c2.x, c2.y);
-      const pulse = 2 + 2 * Math.sin(now/200 + i + j);
-      ctx.strokeStyle = `rgba(0,255,255,0.2)`;
-      ctx.lineWidth = pulse;
-      ctx.shadowColor = `rgba(0,255,255,0.3)`;
+      if (Math.random() < 0.5) {
+        // Прямая
+        ctx.moveTo(c1.x, c1.y);
+        ctx.lineTo(c2.x, c2.y);
+      } else {
+        // Кривая Безье
+        const mx = (c1.x + c2.x) / 2 + (Math.random()-0.5)*100;
+        const my = (c1.y + c2.y) / 2 + (Math.random()-0.5)*100;
+        ctx.moveTo(c1.x, c1.y);
+        ctx.quadraticCurveTo(mx, my, c2.x, c2.y);
+      }
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.lineWidth = 2 + 2 * Math.sin(now/200 + i + j);
+      ctx.shadowColor = 'rgba(255,255,255,0.2)';
       ctx.shadowBlur = 10;
       ctx.stroke();
     }
