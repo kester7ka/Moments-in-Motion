@@ -56,90 +56,56 @@ async function detectObjects() {
 }
 video.addEventListener('loadeddata', detectObjects);
 
-function getLargestObjects(n) {
-  // Если видео не готово, возвращаем пустой массив
-  if (!video.videoWidth || !video.videoHeight) return [];
-  return detectedObjects
-    .slice()
-    .sort((a, b) => (b.bbox[2] * b.bbox[3]) - (a.bbox[2] * a.bbox[3]))
-    .slice(0, n);
-}
-
 // Класс для прямоугольника
 class MovingRect {
-  constructor(idx) {
-    this.idx = idx;
+  constructor() {
     this.randomize();
     this.target = {x: this.x, y: this.y};
     this.speed = 1000 + Math.random() * 500;
+    this.targetType = 'random'; // 'object' или 'random'
     this.targetObjId = null;
-    this.isObject = false;
-    this.width = 60;
-    this.height = 60;
   }
   randomize() {
-    this.width = 40 + Math.random() * 80;
-    this.height = 40 + Math.random() * 80;
+    this.width = Math.random() * 80 + 40;
+    this.height = Math.random() * 80 + 40;
     this.x = Math.random() * (canvas.width - this.width);
     this.y = Math.random() * (canvas.height - this.height);
     this.setNewTarget();
   }
-  setNewTarget() {
-    const largest = getLargestObjects(rects.length);
-    if (largest[this.idx] && video.videoWidth && video.videoHeight) {
-      const obj = largest[this.idx];
-      const scaleX = canvas.width / (video.videoWidth || 1);
-      const scaleY = canvas.height / (video.videoHeight || 1);
-      this.target = {
-        x: obj.bbox[0] * scaleX,
-        y: obj.bbox[1] * scaleY
-      };
-      this.width = Math.max(20, obj.bbox[2] * scaleX);
-      this.height = Math.max(20, obj.bbox[3] * scaleY);
-      this.targetObjId = obj.id || obj.bbox.join('-');
-      this.isObject = true;
-    } else {
-      this.target = {
-        x: Math.random() * (canvas.width - this.width),
-        y: Math.random() * (canvas.height - this.height)
-      };
-      this.width = 40 + Math.random() * 80;
-      this.height = 40 + Math.random() * 80;
-      this.targetObjId = null;
-      this.isObject = false;
-    }
+  setTargetToObject(obj) {
+    const scaleX = canvas.width / video.videoWidth;
+    const scaleY = canvas.height / video.videoHeight;
+    this.target = {
+      x: (obj.bbox[0] + obj.bbox[2]/2) * scaleX - this.width/2,
+      y: (obj.bbox[1] + obj.bbox[3]/2) * scaleY - this.height/2
+    };
+    this.targetType = 'object';
+    this.targetObjId = obj.id || obj.bbox.join('-');
+    this.speed = 1000 + Math.random() * 500;
+  }
+  setTargetToRandom() {
+    this.target = {
+      x: Math.random() * (canvas.width - this.width),
+      y: Math.random() * (canvas.height - this.height)
+    };
+    this.targetType = 'random';
+    this.targetObjId = null;
     this.speed = 1000 + Math.random() * 500;
   }
   move(dt) {
-    const largest = getLargestObjects(rects.length);
-    if (this.targetObjId && !(largest[this.idx] && video.videoWidth && video.videoHeight)) {
-      this.setNewTarget();
-    }
-    if (this.targetObjId && largest[this.idx] && video.videoWidth && video.videoHeight) {
-      const obj = largest[this.idx];
-      const scaleX = canvas.width / (video.videoWidth || 1);
-      const scaleY = canvas.height / (video.videoHeight || 1);
-      this.target = {
-        x: obj.bbox[0] * scaleX,
-        y: obj.bbox[1] * scaleY
-      };
-      this.width = Math.max(20, obj.bbox[2] * scaleX);
-      this.height = Math.max(20, obj.bbox[3] * scaleY);
-      this.targetObjId = obj.id || obj.bbox.join('-');
-      this.isObject = true;
-    } else if (!this.targetObjId) {
-      this.isObject = false;
+    // Если цель была объект, а он исчез — ищем новую
+    if (this.targetType === 'object' && !detectedObjects.some(obj => (obj.id || obj.bbox.join('-')) === this.targetObjId)) {
+      this.setTargetToRandom();
     }
     const dx = this.target.x - this.x;
     const dy = this.target.y - this.y;
     const dist = Math.sqrt(dx*dx + dy*dy);
-    if (!isFinite(dist) || isNaN(dist)) {
-      console.warn('NaN/Inf detected in rect.move', this);
-      this.randomize();
-      return;
-    }
     if (dist < 10) {
-      this.setNewTarget();
+      if (this.targetType === 'random') {
+        this.setTargetToRandom();
+      } else {
+        // Остаёмся на объекте, пока он есть
+      }
       return;
     }
     const moveDist = Math.min(dist, this.speed * dt);
@@ -147,23 +113,26 @@ class MovingRect {
     this.y += dy / dist * moveDist;
   }
   draw(ctx, t) {
-    if (!isFinite(this.x) || !isFinite(this.y) || !isFinite(this.width) || !isFinite(this.height)) {
-      console.warn('NaN/Inf detected in rect.draw', this);
-      return;
-    }
+    // Белый цвет и glow
     ctx.save();
-    ctx.shadowColor = 'rgba(255,255,255,0.3)';
+    ctx.shadowColor = 'rgba(255,255,255,0.5)';
     ctx.shadowBlur = 30;
     ctx.strokeStyle = 'rgba(255,255,255,0.95)';
     ctx.lineWidth = 4;
     ctx.strokeRect(this.x, this.y, this.width, this.height);
-    // Подпись memoris
-    ctx.font = `${Math.floor(this.height/3)}px Arial`;
+    ctx.restore();
+    // Координаты под квадратом
+    ctx.save();
+    ctx.font = '18px monospace';
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(255,255,255,0.95)';
-    ctx.shadowBlur = 0;
-    ctx.fillText('memoris', this.x + this.width/2, this.y + this.height/2);
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'white';
+    const cx = this.x + this.width/2;
+    const cy = this.y + this.height + 4;
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+    ctx.lineWidth = 4;
+    ctx.strokeText(`(${Math.round(cx)}, ${Math.round(cy)})`, cx, cy);
+    ctx.fillText(`(${Math.round(cx)}, ${Math.round(cy)})`, cx, cy);
     ctx.restore();
   }
   center() {
@@ -175,55 +144,54 @@ class MovingRect {
 }
 
 // Массив прямоугольников
-const rects = Array.from({length: 15}, (_,i) => new MovingRect(i));
+const rects = Array.from({length: 15}, () => new MovingRect());
 
-function randomizeRects() {
-  for (const r of rects) r.randomize();
+// Назначаем квадраты к объектам (один к одному, остальные — к случайным)
+function assignRectsToObjects() {
+  // Сохраняем старые назначения
+  const usedObjIds = new Set();
+  // Сначала назначаем квадраты к объектам
+  for (let i = 0; i < rects.length; i++) {
+    if (i < detectedObjects.length) {
+      const obj = detectedObjects[i];
+      rects[i].setTargetToObject(obj);
+      usedObjIds.add(obj.id || obj.bbox.join('-'));
+    } else if (rects[i].targetType !== 'random') {
+      rects[i].setTargetToRandom();
+    }
+  }
 }
-setInterval(randomizeRects, 300); // Резко меняем положение и размер
+setInterval(assignRectsToObjects, 200); // переназначаем цели 5 раз в секунду
 
 // Анимация
 let lastTime = performance.now();
 function animate(now) {
   const dt = Math.min((now - lastTime) / 1000, 0.05);
   lastTime = now;
-  // Диагностический красный фон
-  ctx.fillStyle = 'rgba(255,0,0,0.1)';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (!video.videoWidth || !video.videoHeight) {
-    console.log('Жду загрузки видео...');
-  }
-  // Линии между квадратами: случайно прямые или кривые
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // TouchDesigner-стиль: динамичные линии
   ctx.save();
   for (let i = 0; i < rects.length; i++) {
     for (let j = i + 1; j < rects.length; j++) {
       const c1 = rects[i].center();
       const c2 = rects[j].center();
       ctx.beginPath();
-      if (Math.random() < 0.5) {
-        ctx.moveTo(c1.x, c1.y);
-        ctx.lineTo(c2.x, c2.y);
-      } else {
-        const mx = (c1.x + c2.x) / 2 + (Math.random()-0.5)*100;
-        const my = (c1.y + c2.y) / 2 + (Math.random()-0.5)*100;
-        ctx.moveTo(c1.x, c1.y);
-        ctx.quadraticCurveTo(mx, my, c2.x, c2.y);
-      }
-      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-      ctx.lineWidth = 2 + 2 * Math.sin(now/200 + i + j);
-      ctx.shadowColor = 'rgba(255,255,255,0.2)';
+      ctx.moveTo(c1.x, c1.y);
+      ctx.lineTo(c2.x, c2.y);
+      const pulse = 2 + 2 * Math.sin(now/200 + i + j);
+      ctx.strokeStyle = `rgba(0,255,255,0.2)`;
+      ctx.lineWidth = pulse;
+      ctx.shadowColor = `rgba(0,255,255,0.3)`;
       ctx.shadowBlur = 10;
       ctx.stroke();
     }
   }
   ctx.restore();
   // Двигаем и рисуем прямоугольники
-  rects.forEach((r, idx) => {
+  for (const r of rects) {
     r.move(dt);
     r.draw(ctx, now);
-    // Диагностика: вывод координат и размеров
-    console.log(`rect[${idx}]: x=${r.x.toFixed(1)}, y=${r.y.toFixed(1)}, w=${r.width.toFixed(1)}, h=${r.height.toFixed(1)}`);
-  });
+  }
   requestAnimationFrame(animate);
 }
-requestAnimationFrame(animate); 
+requestAnimationFrame(animate);
