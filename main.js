@@ -1,197 +1,129 @@
-// Получаем элементы
-const video = document.getElementById('video');
-const canvas = document.getElementById('overlay');
+const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
+let W = window.innerWidth, H = window.innerHeight;
+canvas.width = W;
+canvas.height = H;
+window.addEventListener('resize', () => {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W;
+  canvas.height = H;
+});
 
-// Размеры canvas подгоняем под окно
-function resizeCanvas() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-window.addEventListener('resize', resizeCanvas);
-resizeCanvas();
+// --- Camera setup ---
+const video = document.createElement('video');
+video.autoplay = true;
+video.playsInline = true;
+video.style.display = 'none';
+navigator.mediaDevices.getUserMedia({video: true, audio: false})
+  .then(stream => { video.srcObject = stream; })
+  .catch(e => alert('Нет доступа к камере: ' + e));
 
-let currentFacing = 'environment'; // только задняя
-let stream = null;
+// --- Agent (square) setup ---
+const AGENT_SIZE = 10;
+const AGENT_COUNT = 100;
+const AGENT_SPEED = 30; // px/sec
+const STICK_THRESHOLD = 30; // разница яркости для "залипания"
+const MOTION_CHECK_INTERVAL = 120; // ms
+const LINK_DIST = 80;
 
-function startCamera(facingMode = 'environment') {
-  if (stream) {
-    stream.getTracks().forEach(track => track.stop());
-  }
-  navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: false })
-    .then(s => {
-      stream = s;
-      video.srcObject = stream;
-    })
-    .catch(err => {
-      alert('Не удалось получить доступ к камере: ' + err);
-    });
-}
-
-startCamera(currentFacing);
-
-let detectedObjects = [];
-let model = null;
-
-// Создаём отдельный canvas для захвата кадра
-const hiddenCanvas = document.createElement('canvas');
-const hiddenCtx = hiddenCanvas.getContext('2d');
-
-async function loadModel() {
-  model = await cocoSsd.load();
-}
-loadModel();
-
-async function detectObjects() {
-  if (!model || video.readyState !== 4) {
-    setTimeout(detectObjects, 200);
-    return;
-  }
-  hiddenCanvas.width = video.videoWidth;
-  hiddenCanvas.height = video.videoHeight;
-  hiddenCtx.drawImage(video, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
-  const predictions = await model.detect(hiddenCanvas);
-  detectedObjects = predictions;
-  setTimeout(detectObjects, 200); // 5 раз в секунду
-}
-video.addEventListener('loadeddata', detectObjects);
-
-// Класс для прямоугольника
-class MovingRect {
+class Agent {
   constructor() {
-    this.randomize();
-    this.target = {x: this.x, y: this.y};
-    this.speed = 1000 + Math.random() * 500;
-    this.targetType = 'random'; // 'object' или 'random'
-    this.targetObjId = null;
-  }
-  randomize() {
-    this.width = Math.random() * 80 + 40;
-    this.height = Math.random() * 80 + 40;
-    this.x = Math.random() * (canvas.width - this.width);
-    this.y = Math.random() * (canvas.height - this.height);
-    this.setNewTarget();
-  }
-  setTargetToObject(obj) {
-    const scaleX = canvas.width / video.videoWidth;
-    const scaleY = canvas.height / video.videoHeight;
-    this.target = {
-      x: (obj.bbox[0] + obj.bbox[2]/2) * scaleX - this.width/2,
-      y: (obj.bbox[1] + obj.bbox[3]/2) * scaleY - this.height/2
-    };
-    this.targetType = 'object';
-    this.targetObjId = obj.id || obj.bbox.join('-');
-    this.speed = 1000 + Math.random() * 500;
-  }
-  setTargetToRandom() {
-    this.target = {
-      x: Math.random() * (canvas.width - this.width),
-      y: Math.random() * (canvas.height - this.height)
-    };
-    this.targetType = 'random';
-    this.targetObjId = null;
-    this.speed = 1000 + Math.random() * 500;
+    this.x = Math.random() * (W - AGENT_SIZE);
+    this.y = Math.random() * (H - AGENT_SIZE);
+    const angle = Math.random() * 2 * Math.PI;
+    this.vx = Math.cos(angle) * AGENT_SPEED;
+    this.vy = Math.sin(angle) * AGENT_SPEED;
+    this.stuck = false;
   }
   move(dt) {
-    // Если цель была объект, а он исчез — ищем новую
-    if (this.targetType === 'object' && !detectedObjects.some(obj => (obj.id || obj.bbox.join('-')) === this.targetObjId)) {
-      this.setTargetToRandom();
-    }
-    const dx = this.target.x - this.x;
-    const dy = this.target.y - this.y;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist < 10) {
-      if (this.targetType === 'random') {
-        this.setTargetToRandom();
-      } else {
-        // Остаёмся на объекте, пока он есть
-      }
-      return;
-    }
-    const moveDist = Math.min(dist, this.speed * dt);
-    this.x += dx / dist * moveDist;
-    this.y += dy / dist * moveDist;
-  }
-  draw(ctx, t) {
-    // Белый цвет и glow
-    ctx.save();
-    ctx.shadowColor = 'rgba(255,255,255,0.5)';
-    ctx.shadowBlur = 30;
-    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(this.x, this.y, this.width, this.height);
-    ctx.restore();
-    // Координаты под квадратом
-    ctx.save();
-    ctx.font = '18px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = 'white';
-    const cx = this.x + this.width/2;
-    const cy = this.y + this.height + 4;
-    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-    ctx.lineWidth = 4;
-    ctx.strokeText(`(${Math.round(cx)}, ${Math.round(cy)})`, cx, cy);
-    ctx.fillText(`(${Math.round(cx)}, ${Math.round(cy)})`, cx, cy);
-    ctx.restore();
+    if (this.stuck) return;
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    // Отскок от краёв
+    if (this.x < 0) { this.x = 0; this.vx *= -1; }
+    if (this.x > W - AGENT_SIZE) { this.x = W - AGENT_SIZE; this.vx *= -1; }
+    if (this.y < 0) { this.y = 0; this.vy *= -1; }
+    if (this.y > H - AGENT_SIZE) { this.y = H - AGENT_SIZE; this.vy *= -1; }
   }
   center() {
-    return {
-      x: this.x + this.width / 2,
-      y: this.y + this.height / 2
-    };
+    return {x: this.x + AGENT_SIZE/2, y: this.y + AGENT_SIZE/2};
   }
 }
+const agents = Array.from({length: AGENT_COUNT}, () => new Agent());
 
-// Массив прямоугольников
-const rects = Array.from({length: 15}, () => new MovingRect());
-
-// Назначаем квадраты к объектам (один к одному, остальные — к случайным)
-function assignRectsToObjects() {
-  // Сохраняем старые назначения
-  const usedObjIds = new Set();
-  // Сначала назначаем квадраты к объектам
-  for (let i = 0; i < rects.length; i++) {
-    if (i < detectedObjects.length) {
-      const obj = detectedObjects[i];
-      rects[i].setTargetToObject(obj);
-      usedObjIds.add(obj.id || obj.bbox.join('-'));
-    } else if (rects[i].targetType !== 'random') {
-      rects[i].setTargetToRandom();
+// --- Motion detection ---
+let prevFrame = null;
+function getFrameData() {
+  ctx.drawImage(video, 0, 0, W, H);
+  return ctx.getImageData(0, 0, W, H);
+}
+function checkMotion() {
+  if (!prevFrame) {
+    prevFrame = getFrameData();
+    return;
+  }
+  const currFrame = getFrameData();
+  for (const agent of agents) {
+    if (agent.stuck) continue;
+    const cx = Math.floor(agent.x + AGENT_SIZE/2);
+    const cy = Math.floor(agent.y + AGENT_SIZE/2);
+    if (cx < 0 || cy < 0 || cx >= W || cy >= H) continue;
+    const idx = (cy * W + cx) * 4;
+    const r1 = prevFrame.data[idx];
+    const r2 = currFrame.data[idx];
+    if (Math.abs(r1 - r2) > STICK_THRESHOLD) {
+      agent.stuck = true;
     }
   }
+  prevFrame = currFrame;
 }
-setInterval(assignRectsToObjects, 200); // переназначаем цели 5 раз в секунду
+setInterval(checkMotion, MOTION_CHECK_INTERVAL);
 
-// Анимация
+// --- Animation ---
+function draw() {
+  // 1. Нарисовать видео
+  ctx.drawImage(video, 0, 0, W, H);
+  // 2. Нарисовать связи
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < agents.length; i++) {
+    const a = agents[i];
+    const ca = a.center();
+    for (let j = i+1; j < agents.length; j++) {
+      const b = agents[j];
+      const cb = b.center();
+      const dx = ca.x - cb.x, dy = ca.y - cb.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < LINK_DIST) {
+        ctx.beginPath();
+        ctx.moveTo(ca.x, ca.y);
+        ctx.lineTo(cb.x, cb.y);
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.restore();
+  // 3. Нарисовать квадраты
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 2;
+  for (const agent of agents) {
+    ctx.globalAlpha = agent.stuck ? 1 : 0.6;
+    ctx.strokeRect(agent.x, agent.y, AGENT_SIZE, AGENT_SIZE);
+  }
+  ctx.restore();
+}
 let lastTime = performance.now();
 function animate(now) {
   const dt = Math.min((now - lastTime) / 1000, 0.05);
   lastTime = now;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // TouchDesigner-стиль: динамичные линии
-  ctx.save();
-  for (let i = 0; i < rects.length; i++) {
-    for (let j = i + 1; j < rects.length; j++) {
-      const c1 = rects[i].center();
-      const c2 = rects[j].center();
-      ctx.beginPath();
-      ctx.moveTo(c1.x, c1.y);
-      ctx.lineTo(c2.x, c2.y);
-      const pulse = 2 + 2 * Math.sin(now/200 + i + j);
-      ctx.strokeStyle = `rgba(0,255,255,0.2)`;
-      ctx.lineWidth = pulse;
-      ctx.shadowColor = `rgba(0,255,255,0.3)`;
-      ctx.shadowBlur = 10;
-      ctx.stroke();
-    }
-  }
-  ctx.restore();
-  // Двигаем и рисуем прямоугольники
-  for (const r of rects) {
-    r.move(dt);
-    r.draw(ctx, now);
-  }
+  for (const agent of agents) agent.move(dt);
+  draw();
   requestAnimationFrame(animate);
 }
-requestAnimationFrame(animate);
+video.addEventListener('playing', () => {
+  lastTime = performance.now();
+  requestAnimationFrame(animate);
+});
