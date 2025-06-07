@@ -135,10 +135,13 @@ async function detectHands() {
   }
 }
 
-// COCO-SSD
+// Для bbox-целей (объекты) — распределяем агентов по периметру bbox
+// Для этого нужно сохранять bbox из Coco-SSD
+let detectedBboxes = [];
 async function detectObjects() {
   if (!cocoModel || !video.videoWidth || !video.videoHeight) return;
   const predictions = await cocoModel.detect(video);
+  detectedBboxes = predictions.map(obj => obj.bbox); // [x, y, w, h]
   return predictions.map(obj => ({
     x: obj.bbox[0] + obj.bbox[2]/2,
     y: obj.bbox[1] + obj.bbox[3]/2
@@ -250,13 +253,24 @@ function draw() {
     ctx.strokeRect(agent.x, agent.y, AGENT_SIZE, AGENT_SIZE);
   }
   ctx.restore();
+  // Временно: landmark-и руки (синие кружки)
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'blue';
+  if (handsResults && handsResults.length > 0) {
+    for (const lm of handsResults) {
+      ctx.beginPath();
+      ctx.arc(lm.x, lm.y, 6, 0, 2*Math.PI);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
 }
 
 function animate() {
   // Распределяем агентов по landmark-ам руки, если они есть
   let handLandmarks = (handsResults && handsResults.length >= 5) ? handsResults : null;
   let now = performance.now();
-  // dt подстраиваем под измеренный FPS видео
   let targetFps = Math.max(30, Math.min(60, Math.round(measuredVideoFps)));
   let dt = 1 / targetFps;
   animate.lastTime = now;
@@ -272,17 +286,30 @@ function animate() {
       agents[used].moveSmart(handLandmarks[i], dt, agents);
       agents[used].visible = true;
     }
-  } else if (detectedTargets.length > 0) {
-    // Для bbox-целей (объекты) — вычисляем нужное число агентов по размеру bbox
+  } else if (detectedTargets.length > 0 && detectedBboxes.length === detectedTargets.length) {
+    // Для bbox-целей (объекты) — агенты по периметру bbox
     for (let t = 0; t < detectedTargets.length; t++) {
-      let center = detectedTargets[t];
+      let bbox = detectedBboxes[t];
       let n = Math.min(MAX_AGENTS_PER_TARGET, agents.length - used);
       if (n <= 0) break;
-      let radius = 30;
+      // Периметр прямоугольника
+      let perim = 2 * (bbox[2] + bbox[3]);
       for (let k = 0; k < n; k++, used++) {
-        let angle = (2 * Math.PI * k) / n;
-        let tx = center.x + Math.cos(angle) * radius;
-        let ty = center.y + Math.sin(angle) * radius;
+        let p = (perim * k) / n;
+        let tx, ty;
+        if (p < bbox[2]) { // верхняя грань
+          tx = bbox[0] + p;
+          ty = bbox[1];
+        } else if (p < bbox[2] + bbox[3]) { // правая грань
+          tx = bbox[0] + bbox[2];
+          ty = bbox[1] + (p - bbox[2]);
+        } else if (p < bbox[2] + bbox[3] + bbox[2]) { // нижняя грань
+          tx = bbox[0] + bbox[2] - (p - bbox[2] - bbox[3]);
+          ty = bbox[1] + bbox[3];
+        } else { // левая грань
+          tx = bbox[0];
+          ty = bbox[1] + bbox[3] - (p - bbox[2] - bbox[3] - bbox[2]);
+        }
         agents[used].moveSmart({x: tx, y: ty}, dt, agents);
         agents[used].visible = true;
       }
