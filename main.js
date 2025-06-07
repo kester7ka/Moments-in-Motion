@@ -21,7 +21,7 @@ navigator.mediaDevices.getUserMedia({video: { facingMode: { exact: 'environment'
 
 // --- Agent (square) setup ---
 const AGENT_SIZE = 10;
-const AGENT_COUNT = 100;
+const AGENT_COUNT = 50;
 const LINK_DIST = 80;
 const AGENT_SPEED = 1000; // px/sec, очень быстро
 const AGENT_REPEL_DIST = 18; // минимальное расстояние между агентами
@@ -92,6 +92,7 @@ let detectedTargets = [];
 let cocoModel = null;
 let hands = null;
 let handsResults = [];
+let detectToggle = true; // для чередования моделей
 
 // MediaPipe Hands setup
 function setupHands() {
@@ -138,13 +139,20 @@ async function detectObjects() {
 
 // Объединяем все цели
 async function updateTargets() {
-  const cocoTargets = await detectObjects() || [];
-  await detectHands();
-  detectedTargets = [...cocoTargets, ...handsResults];
+  if (detectToggle) {
+    const cocoTargets = await detectObjects() || [];
+    detectedTargets = cocoTargets;
+  } else {
+    await detectHands();
+    if (handsResults && handsResults.length > 0) {
+      detectedTargets = handsResults;
+    }
+  }
+  detectToggle = !detectToggle;
 }
 cocoSsd.load().then(model => {
   cocoModel = model;
-  setInterval(updateTargets, 120); // оптимальная частота
+  setInterval(updateTargets, 180); // оптимальная частота
 });
 
 // Включаем WebGL backend для TensorFlow.js
@@ -186,16 +194,6 @@ function draw() {
     if (!agent.visible) continue;
     ctx.globalAlpha = 1;
     ctx.strokeRect(agent.x, agent.y, AGENT_SIZE, AGENT_SIZE);
-  }
-  ctx.restore();
-  // Показываем все найденные цели (detectedTargets) красными кружками
-  ctx.save();
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = 'red';
-  for (const t of detectedTargets) {
-    ctx.beginPath();
-    ctx.arc(t.x, t.y, 7, 0, 2*Math.PI);
-    ctx.fill();
   }
   ctx.restore();
 }
