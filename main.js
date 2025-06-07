@@ -24,6 +24,8 @@ const AGENT_SIZE = 10;
 const AGENT_COUNT = 100;
 const LINK_DIST = 80;
 const AGENT_SPEED = 1000; // px/sec, очень быстро
+const AGENT_REPEL_DIST = 18; // минимальное расстояние между агентами
+const AGENT_REPEL_FORCE = 4000; // сила отталкивания
 
 class Agent {
   constructor() {
@@ -33,30 +35,49 @@ class Agent {
     this.vy = 0;
     this.target = null;
   }
-  moveSmart(target, dt) {
+  moveSmart(target, dt, agents) {
+    let fx = 0, fy = 0;
+    // Притяжение к цели
     if (target) {
-      // Летим к цели с большой скоростью
       const tx = target.x - AGENT_SIZE/2;
       const ty = target.y - AGENT_SIZE/2;
       const dx = tx - this.x;
       const dy = ty - this.y;
       const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < AGENT_SPEED * dt) {
-        this.x = tx;
-        this.y = ty;
-      } else {
-        this.x += (dx / dist) * AGENT_SPEED * dt;
-        this.y += (dy / dist) * AGENT_SPEED * dt;
+      if (dist > 1) {
+        fx += (dx / dist) * AGENT_SPEED;
+        fy += (dy / dist) * AGENT_SPEED;
       }
     } else {
       // хаотичное движение
-      this.x += (Math.random() - 0.5) * 10;
-      this.y += (Math.random() - 0.5) * 10;
-      if (this.x < 0) this.x = 0;
-      if (this.x > canvas.width - AGENT_SIZE) this.x = canvas.width - AGENT_SIZE;
-      if (this.y < 0) this.y = 0;
-      if (this.y > canvas.height - AGENT_SIZE) this.y = canvas.height - AGENT_SIZE;
+      fx += (Math.random() - 0.5) * 200;
+      fy += (Math.random() - 0.5) * 200;
     }
+    // Отталкивание от других агентов
+    for (const other of agents) {
+      if (other === this) continue;
+      const dx = this.x - other.x;
+      const dy = this.y - other.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < AGENT_REPEL_DIST && dist > 0.1) {
+        const force = AGENT_REPEL_FORCE / (dist * dist);
+        fx += (dx / dist) * force;
+        fy += (dy / dist) * force;
+      }
+    }
+    // Итоговое перемещение
+    const len = Math.sqrt(fx*fx + fy*fy);
+    if (len > AGENT_SPEED) {
+      fx = fx / len * AGENT_SPEED;
+      fy = fy / len * AGENT_SPEED;
+    }
+    this.x += fx * dt;
+    this.y += fy * dt;
+    // Границы
+    if (this.x < 0) this.x = 0;
+    if (this.x > canvas.width - AGENT_SIZE) this.x = canvas.width - AGENT_SIZE;
+    if (this.y < 0) this.y = 0;
+    if (this.y > canvas.height - AGENT_SIZE) this.y = canvas.height - AGENT_SIZE;
   }
   center() {
     return {x: this.x + AGENT_SIZE/2, y: this.y + AGENT_SIZE/2};
@@ -121,7 +142,7 @@ async function updateTargets() {
 }
 cocoSsd.load().then(model => {
   cocoModel = model;
-  setInterval(updateTargets, 50); // быстрее обновляем цели
+  setInterval(updateTargets, 120); // оптимальная частота
 });
 
 // --- Animation ---
@@ -185,19 +206,18 @@ function animate() {
       for (let k = 0; k < n; k++, idx++) {
         // Для каждого агента вокруг объекта — размещаем по кругу
         let angle = (2 * Math.PI * k) / n;
-        let radius = 30 + 10 * (k % 3); // чуть разнесём по радиусу
+        let radius = 30 + 10 * (k % 3);
         let tx = targets[t].x + Math.cos(angle) * radius;
         let ty = targets[t].y + Math.sin(angle) * radius;
-        agents[idx].moveSmart({x: tx, y: ty}, dt);
+        agents[idx].moveSmart({x: tx, y: ty}, dt, agents);
       }
     }
-    // Если агентов больше, чем целей, оставшиеся хаотично
     for (; idx < agents.length; idx++) {
-      agents[idx].moveSmart(null, dt);
+      agents[idx].moveSmart(null, dt, agents);
     }
   } else {
     for (let i = 0; i < agents.length; i++) {
-      agents[i].moveSmart(null, dt);
+      agents[i].moveSmart(null, dt, agents);
     }
   }
   draw();
