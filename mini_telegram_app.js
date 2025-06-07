@@ -20,39 +20,60 @@ navigator.mediaDevices.getUserMedia({ video: true, audio: false })
     alert('Не удалось получить доступ к камере: ' + err);
   });
 
-// Класс для квадратика
-class MovingSquare {
+// Класс для прямоугольника
+class MovingRect {
   constructor() {
-    this.size = Math.random() * 60 + 20; // 20-80px
-    this.x = Math.random() * (canvas.width - this.size);
-    this.y = Math.random() * (canvas.height - this.size);
-    this.vx = (Math.random() - 0.5) * 12; // скорость по X
-    this.vy = (Math.random() - 0.5) * 12; // скорость по Y
-    this.color = `rgba(${Math.floor(Math.random()*255)},${Math.floor(Math.random()*255)},${Math.floor(Math.random()*255)},0.7)`;
+    this.randomize();
   }
-  move() {
-    this.x += this.vx;
-    this.y += this.vy;
-    // Отскок от краёв
-    if (this.x < 0 || this.x + this.size > canvas.width) this.vx *= -1;
-    if (this.y < 0 || this.y + this.size > canvas.height) this.vy *= -1;
+  randomize() {
+    this.width = Math.random() * 80 + 40; // 40-120px
+    this.height = Math.random() * 80 + 40; // 40-120px
+    this.x = Math.random() * (canvas.width - this.width);
+    this.y = Math.random() * (canvas.height - this.height);
+    this.color = 'rgba(120,120,120,0.7)'; // Серый
   }
   draw(ctx) {
     ctx.strokeStyle = this.color;
     ctx.lineWidth = 3;
-    ctx.strokeRect(this.x, this.y, this.size, this.size);
+    ctx.strokeRect(this.x, this.y, this.width, this.height);
+  }
+  center() {
+    return {
+      x: this.x + this.width / 2,
+      y: this.y + this.height / 2
+    };
   }
 }
 
-// Массив квадратов
-const squares = Array.from({length: 25}, () => new MovingSquare());
+// Массив прямоугольников
+const rects = Array.from({length: 15}, () => new MovingRect());
+
+function randomizeRects() {
+  for (const r of rects) r.randomize();
+}
+setInterval(randomizeRects, 300); // Резко меняем положение и размер
 
 // Анимация
 function animate() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  for (const sq of squares) {
-    sq.move();
-    sq.draw(ctx);
+  // Соединяем центры линиями
+  ctx.save();
+  ctx.strokeStyle = 'rgba(180,180,180,0.5)';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < rects.length; i++) {
+    for (let j = i + 1; j < rects.length; j++) {
+      const c1 = rects[i].center();
+      const c2 = rects[j].center();
+      ctx.beginPath();
+      ctx.moveTo(c1.x, c1.y);
+      ctx.lineTo(c2.x, c2.y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+  // Рисуем прямоугольники
+  for (const r of rects) {
+    r.draw(ctx);
   }
   requestAnimationFrame(animate);
 }
