@@ -3,49 +3,32 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mini Telegram Camera App</title>
+  <title>Motion Scan Grid</title>
   <style>
-    body, html {
+    html, body {
       margin: 0;
       padding: 0;
       overflow: hidden;
       background: #000;
-      height: 100%;
-      width: 100%;
-    }
-    #container {
-      position: relative;
       width: 100vw;
       height: 100vh;
-      overflow: hidden;
     }
-    #video {
+    body {
+      width: 100vw;
+      height: 100vh;
+    }
+    canvas {
+      display: block;
       position: absolute;
-      top: 0;
-      left: 0;
+      top: 0; left: 0;
       width: 100vw;
       height: 100vh;
-      object-fit: cover;
-      z-index: 1;
-    }
-    #overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      z-index: 2;
-      pointer-events: none;
+      background: #000;
     }
   </style>
 </head>
 <body>
-  <div id="container">
-    <video id="video" autoplay playsinline></video>
-    <canvas id="overlay"></canvas>
-  </div>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.18.0/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
-  <script src="main.js"></script>
+<canvas id="canvas"></canvas>
+<script src="main.js"></script>
 </body>
 </html> 
