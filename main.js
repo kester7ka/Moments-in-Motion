@@ -187,7 +187,9 @@ let lastTime = performance.now();
 function animate(now) {
   const dt = Math.min((now - lastTime) / 1000, 0.05);
   lastTime = now;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Диагностический красный фон
+  ctx.fillStyle = 'rgba(255,0,0,0.1)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
   if (!video.videoWidth || !video.videoHeight) {
     console.log('Жду загрузки видео...');
   }
@@ -199,11 +201,9 @@ function animate(now) {
       const c2 = rects[j].center();
       ctx.beginPath();
       if (Math.random() < 0.5) {
-        // Прямая
         ctx.moveTo(c1.x, c1.y);
         ctx.lineTo(c2.x, c2.y);
       } else {
-        // Кривая Безье
         const mx = (c1.x + c2.x) / 2 + (Math.random()-0.5)*100;
         const my = (c1.y + c2.y) / 2 + (Math.random()-0.5)*100;
         ctx.moveTo(c1.x, c1.y);
@@ -218,10 +218,12 @@ function animate(now) {
   }
   ctx.restore();
   // Двигаем и рисуем прямоугольники
-  for (const r of rects) {
+  rects.forEach((r, idx) => {
     r.move(dt);
     r.draw(ctx, now);
-  }
+    // Диагностика: вывод координат и размеров
+    console.log(`rect[${idx}]: x=${r.x.toFixed(1)}, y=${r.y.toFixed(1)}, w=${r.width.toFixed(1)}, h=${r.height.toFixed(1)}`);
+  });
   requestAnimationFrame(animate);
 }
 requestAnimationFrame(animate); 
