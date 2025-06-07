@@ -31,10 +31,22 @@ class Agent {
     this.vx = 0;
     this.vy = 0;
   }
-  moveInstant(target) {
-    if (target) {
-      this.x = target.x - AGENT_SIZE/2;
-      this.y = target.y - AGENT_SIZE/2;
+  moveSmart(targets) {
+    if (targets && targets.length > 0) {
+      // Найти ближайший объект
+      let minDist = Infinity, tx = null, ty = null;
+      for (const t of targets) {
+        const dx = t.x - (this.x + AGENT_SIZE/2);
+        const dy = t.y - (this.y + AGENT_SIZE/2);
+        const dist = dx*dx + dy*dy;
+        if (dist < minDist) {
+          minDist = dist;
+          tx = t.x; ty = t.y;
+        }
+      }
+      // Почти мгновенно перемещаемся к объекту
+      this.x = tx - AGENT_SIZE/2;
+      this.y = ty - AGENT_SIZE/2;
     } else {
       // хаотичное движение
       this.x += (Math.random() - 0.5) * 10;
@@ -135,12 +147,14 @@ function draw() {
     }
   }
   ctx.restore();
-  // Квадраты
+  // Квадраты — ярко-белые с glow
   ctx.save();
-  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#fff';
+  ctx.shadowColor = '#fff';
+  ctx.shadowBlur = 12;
+  ctx.lineWidth = 3;
   for (const agent of agents) {
-    ctx.globalAlpha = 0.8;
+    ctx.globalAlpha = 1;
     ctx.strokeRect(agent.x, agent.y, AGENT_SIZE, AGENT_SIZE);
   }
   ctx.restore();
@@ -154,14 +168,8 @@ function draw() {
 }
 
 function animate() {
-  // Равномерно распределяем агентов по целям
-  let targets = detectedTargets.length > 0 ? detectedTargets : null;
   for (let i = 0; i < agents.length; i++) {
-    let target = null;
-    if (targets) {
-      target = targets[i % targets.length];
-    }
-    agents[i].moveInstant(target);
+    agents[i].moveSmart(detectedTargets);
   }
   draw();
   requestAnimationFrame(animate);
