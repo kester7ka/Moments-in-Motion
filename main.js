@@ -57,7 +57,8 @@ async function detectObjects() {
 video.addEventListener('loadeddata', detectObjects);
 
 function getLargestObjects(n) {
-  // Сортируем по площади bbox (самые крупные объекты)
+  // Если видео не готово, возвращаем пустой массив
+  if (!video.videoWidth || !video.videoHeight) return [];
   return detectedObjects
     .slice()
     .sort((a, b) => (b.bbox[2] * b.bbox[3]) - (a.bbox[2] * a.bbox[3]))
@@ -85,16 +86,16 @@ class MovingRect {
   }
   setNewTarget() {
     const largest = getLargestObjects(rects.length);
-    if (largest[this.idx]) {
+    if (largest[this.idx] && video.videoWidth && video.videoHeight) {
       const obj = largest[this.idx];
-      const scaleX = canvas.width / video.videoWidth;
-      const scaleY = canvas.height / video.videoHeight;
+      const scaleX = canvas.width / (video.videoWidth || 1);
+      const scaleY = canvas.height / (video.videoHeight || 1);
       this.target = {
         x: obj.bbox[0] * scaleX,
         y: obj.bbox[1] * scaleY
       };
-      this.width = obj.bbox[2] * scaleX;
-      this.height = obj.bbox[3] * scaleY;
+      this.width = Math.max(20, obj.bbox[2] * scaleX);
+      this.height = Math.max(20, obj.bbox[3] * scaleY);
       this.targetObjId = obj.id || obj.bbox.join('-');
       this.isObject = true;
     } else {
@@ -111,19 +112,19 @@ class MovingRect {
   }
   move(dt) {
     const largest = getLargestObjects(rects.length);
-    if (this.targetObjId && !largest[this.idx]) {
+    if (this.targetObjId && !(largest[this.idx] && video.videoWidth && video.videoHeight)) {
       this.setNewTarget();
     }
-    if (this.targetObjId && largest[this.idx]) {
+    if (this.targetObjId && largest[this.idx] && video.videoWidth && video.videoHeight) {
       const obj = largest[this.idx];
-      const scaleX = canvas.width / video.videoWidth;
-      const scaleY = canvas.height / video.videoHeight;
+      const scaleX = canvas.width / (video.videoWidth || 1);
+      const scaleY = canvas.height / (video.videoHeight || 1);
       this.target = {
         x: obj.bbox[0] * scaleX,
         y: obj.bbox[1] * scaleY
       };
-      this.width = obj.bbox[2] * scaleX;
-      this.height = obj.bbox[3] * scaleY;
+      this.width = Math.max(20, obj.bbox[2] * scaleX);
+      this.height = Math.max(20, obj.bbox[3] * scaleY);
       this.targetObjId = obj.id || obj.bbox.join('-');
       this.isObject = true;
     } else if (!this.targetObjId) {
@@ -132,6 +133,11 @@ class MovingRect {
     const dx = this.target.x - this.x;
     const dy = this.target.y - this.y;
     const dist = Math.sqrt(dx*dx + dy*dy);
+    if (!isFinite(dist) || isNaN(dist)) {
+      console.warn('NaN/Inf detected in rect.move', this);
+      this.randomize();
+      return;
+    }
     if (dist < 10) {
       this.setNewTarget();
       return;
@@ -141,6 +147,10 @@ class MovingRect {
     this.y += dy / dist * moveDist;
   }
   draw(ctx, t) {
+    if (!isFinite(this.x) || !isFinite(this.y) || !isFinite(this.width) || !isFinite(this.height)) {
+      console.warn('NaN/Inf detected in rect.draw', this);
+      return;
+    }
     ctx.save();
     ctx.shadowColor = 'rgba(255,255,255,0.3)';
     ctx.shadowBlur = 30;
@@ -178,6 +188,9 @@ function animate(now) {
   const dt = Math.min((now - lastTime) / 1000, 0.05);
   lastTime = now;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!video.videoWidth || !video.videoHeight) {
+    console.log('Жду загрузки видео...');
+  }
   // Линии между квадратами: случайно прямые или кривые
   ctx.save();
   for (let i = 0; i < rects.length; i++) {
