@@ -155,8 +155,54 @@ cocoSsd.load().then(model => {
   setInterval(updateTargets, 180); // оптимальная частота
 });
 
-// Включаем WebGL backend для TensorFlow.js
-if (window.tf && tf.setBackend) tf.setBackend('webgl');
+// --- TensorFlow.js backend selection ---
+(async () => {
+  if (window.tf && tf.setBackend) {
+    try {
+      await tf.setBackend('webgl');
+      await tf.ready();
+      // Проверим, действительно ли webgl работает
+      if (tf.getBackend() !== 'webgl') {
+        await tf.setBackend('wasm');
+        await tf.ready();
+      }
+    } catch (e) {
+      await tf.setBackend('wasm');
+      await tf.ready();
+    }
+  }
+})();
+
+// --- FPS sync ---
+let lastVideoFrameTime = null;
+let measuredVideoFps = 60;
+let videoFrameCount = 0;
+let fpsMeasureStart = null;
+
+function measureVideoFps() {
+  if (!fpsMeasureStart) fpsMeasureStart = performance.now();
+  videoFrameCount++;
+  const now = performance.now();
+  if (now - fpsMeasureStart > 1000) {
+    measuredVideoFps = videoFrameCount / ((now - fpsMeasureStart) / 1000);
+    videoFrameCount = 0;
+    fpsMeasureStart = now;
+  }
+}
+
+// Для большинства браузеров нет onframe, используем requestAnimationFrame + video.currentTime
+let lastVideoTime = 0;
+function checkVideoFrame() {
+  if (video.currentTime !== lastVideoTime) {
+    measureVideoFps();
+    lastVideoTime = video.currentTime;
+  }
+  requestAnimationFrame(checkVideoFrame);
+}
+video.addEventListener('play', () => {
+  lastVideoTime = video.currentTime;
+  requestAnimationFrame(checkVideoFrame);
+});
 
 // --- Animation ---
 function draw() {
@@ -202,7 +248,9 @@ function animate() {
   // Распределяем агентов по landmark-ам руки, если они есть
   let handLandmarks = (handsResults && handsResults.length >= 5) ? handsResults : null;
   let now = performance.now();
-  let dt = (typeof animate.lastTime === 'number') ? (now - animate.lastTime) / 1000 : 0.016;
+  // dt подстраиваем под измеренный FPS видео
+  let targetFps = Math.max(30, Math.min(60, Math.round(measuredVideoFps)));
+  let dt = 1 / targetFps;
   animate.lastTime = now;
 
   // Скрываем всех агентов по умолчанию
@@ -219,13 +267,9 @@ function animate() {
   } else if (detectedTargets.length > 0) {
     // Для bbox-целей (объекты) — вычисляем нужное число агентов по размеру bbox
     for (let t = 0; t < detectedTargets.length; t++) {
-      // Для COCO-SSD bbox-ы не сохраняются, поэтому вычислим примерный размер по соседним целям
-      // (или можно доработать детекцию, чтобы сохранять bbox)
-      // Здесь просто используем фиксированный радиус
       let center = detectedTargets[t];
       let n = Math.min(MAX_AGENTS_PER_TARGET, agents.length - used);
       if (n <= 0) break;
-      // Можно сделать n пропорциональным размеру объекта, если есть bbox
       let radius = 30;
       for (let k = 0; k < n; k++, used++) {
         let angle = (2 * Math.PI * k) / n;
