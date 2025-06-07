@@ -23,6 +23,7 @@ navigator.mediaDevices.getUserMedia({video: { facingMode: { exact: 'environment'
 const AGENT_SIZE = 10;
 const AGENT_COUNT = 100;
 const LINK_DIST = 80;
+const AGENT_SPEED = 1000; // px/sec, очень быстро
 
 class Agent {
   constructor() {
@@ -30,23 +31,23 @@ class Agent {
     this.y = Math.random() * (canvas.height - AGENT_SIZE);
     this.vx = 0;
     this.vy = 0;
+    this.target = null;
   }
-  moveSmart(targets) {
-    if (targets && targets.length > 0) {
-      // Найти ближайший объект
-      let minDist = Infinity, tx = null, ty = null;
-      for (const t of targets) {
-        const dx = t.x - (this.x + AGENT_SIZE/2);
-        const dy = t.y - (this.y + AGENT_SIZE/2);
-        const dist = dx*dx + dy*dy;
-        if (dist < minDist) {
-          minDist = dist;
-          tx = t.x; ty = t.y;
-        }
+  moveSmart(target, dt) {
+    if (target) {
+      // Летим к цели с большой скоростью
+      const tx = target.x - AGENT_SIZE/2;
+      const ty = target.y - AGENT_SIZE/2;
+      const dx = tx - this.x;
+      const dy = ty - this.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < AGENT_SPEED * dt) {
+        this.x = tx;
+        this.y = ty;
+      } else {
+        this.x += (dx / dist) * AGENT_SPEED * dt;
+        this.y += (dy / dist) * AGENT_SPEED * dt;
       }
-      // Почти мгновенно перемещаемся к объекту
-      this.x = tx - AGENT_SIZE/2;
-      this.y = ty - AGENT_SIZE/2;
     } else {
       // хаотичное движение
       this.x += (Math.random() - 0.5) * 10;
@@ -120,7 +121,7 @@ async function updateTargets() {
 }
 cocoSsd.load().then(model => {
   cocoModel = model;
-  setInterval(updateTargets, 200);
+  setInterval(updateTargets, 50); // быстрее обновляем цели
 });
 
 // --- Animation ---
@@ -168,8 +169,36 @@ function draw() {
 }
 
 function animate() {
-  for (let i = 0; i < agents.length; i++) {
-    agents[i].moveSmart(detectedTargets);
+  // Распределяем агентов по объектам
+  let targets = detectedTargets.length > 0 ? detectedTargets : null;
+  let now = performance.now();
+  let dt = (typeof animate.lastTime === 'number') ? (now - animate.lastTime) / 1000 : 0.016;
+  animate.lastTime = now;
+
+  if (targets) {
+    // Группируем агентов по объектам
+    let perObj = Math.floor(agents.length / targets.length);
+    let extra = agents.length % targets.length;
+    let idx = 0;
+    for (let t = 0; t < targets.length; t++) {
+      let n = perObj + (t < extra ? 1 : 0);
+      for (let k = 0; k < n; k++, idx++) {
+        // Для каждого агента вокруг объекта — размещаем по кругу
+        let angle = (2 * Math.PI * k) / n;
+        let radius = 30 + 10 * (k % 3); // чуть разнесём по радиусу
+        let tx = targets[t].x + Math.cos(angle) * radius;
+        let ty = targets[t].y + Math.sin(angle) * radius;
+        agents[idx].moveSmart({x: tx, y: ty}, dt);
+      }
+    }
+    // Если агентов больше, чем целей, оставшиеся хаотично
+    for (; idx < agents.length; idx++) {
+      agents[idx].moveSmart(null, dt);
+    }
+  } else {
+    for (let i = 0; i < agents.length; i++) {
+      agents[i].moveSmart(null, dt);
+    }
   }
   draw();
   requestAnimationFrame(animate);
