@@ -7,7 +7,7 @@ video.autoplay = true;
 video.playsInline = true;
 video.style.display = 'none';
 
-navigator.mediaDevices.getUserMedia({video: { facingMode: { exact: 'environment' } }, audio: false})
+navigator.mediaDevices.getUserMedia({video: { facingMode: 'environment' }, audio: false})
   .then(stream => {
     video.srcObject = stream;
     video.onloadedmetadata = () => {
@@ -15,6 +15,8 @@ navigator.mediaDevices.getUserMedia({video: { facingMode: { exact: 'environment'
       H = video.videoHeight;
       canvas.width = W;
       canvas.height = H;
+      // canvas.style.width = W + 'px';
+      // canvas.style.height = H + 'px';
     };
   })
   .catch(e => alert('Нет доступа к камере: ' + e));
@@ -23,7 +25,7 @@ navigator.mediaDevices.getUserMedia({video: { facingMode: { exact: 'environment'
 const AGENT_SIZE = 10;
 const AGENT_COUNT = 50;
 const LINK_DIST = 80;
-const AGENT_SPEED = 1000; // px/sec, очень быстро
+const AGENT_SPEED = 400; // px/sec, плавно
 const AGENT_REPEL_DIST = 18; // минимальное расстояние между агентами
 const AGENT_REPEL_FORCE = 4000; // сила отталкивания
 const MAX_AGENTS_PER_TARGET = 15;
@@ -39,7 +41,7 @@ class Agent {
   }
   moveSmart(target, dt, agents) {
     let fx = 0, fy = 0;
-    // Притяжение к цели
+    // Притяжение к цели (плавно, без телепортации)
     if (target) {
       const tx = target.x - AGENT_SIZE/2;
       const ty = target.y - AGENT_SIZE/2;
@@ -47,13 +49,27 @@ class Agent {
       const dy = ty - this.y;
       const dist = Math.sqrt(dx*dx + dy*dy);
       if (dist > 1) {
-        fx += (dx / dist) * AGENT_SPEED;
-        fy += (dy / dist) * AGENT_SPEED;
+        // Плавное движение: ограничиваем максимальное перемещение за кадр
+        const maxStep = AGENT_SPEED * dt;
+        if (dist < maxStep) {
+          this.x = tx;
+          this.y = ty;
+        } else {
+          this.x += (dx / dist) * maxStep;
+          this.y += (dy / dist) * maxStep;
+        }
       }
     } else {
       // хаотичное движение
       fx += (Math.random() - 0.5) * 200;
       fy += (Math.random() - 0.5) * 200;
+      const len = Math.sqrt(fx*fx + fy*fy);
+      if (len > AGENT_SPEED) {
+        fx = fx / len * AGENT_SPEED;
+        fy = fy / len * AGENT_SPEED;
+      }
+      this.x += fx * dt;
+      this.y += fy * dt;
     }
     // Отталкивание от других агентов
     for (const other of agents) {
@@ -63,18 +79,10 @@ class Agent {
       const dist = Math.sqrt(dx*dx + dy*dy);
       if (dist < AGENT_REPEL_DIST && dist > 0.1) {
         const force = AGENT_REPEL_FORCE / (dist * dist);
-        fx += (dx / dist) * force;
-        fy += (dy / dist) * force;
+        this.x += (dx / dist) * force * dt * 0.5;
+        this.y += (dy / dist) * force * dt * 0.5;
       }
     }
-    // Итоговое перемещение
-    const len = Math.sqrt(fx*fx + fy*fy);
-    if (len > AGENT_SPEED) {
-      fx = fx / len * AGENT_SPEED;
-      fy = fy / len * AGENT_SPEED;
-    }
-    this.x += fx * dt;
-    this.y += fy * dt;
     // Границы
     if (this.x < 0) this.x = 0;
     if (this.x > canvas.width - AGENT_SIZE) this.x = canvas.width - AGENT_SIZE;
