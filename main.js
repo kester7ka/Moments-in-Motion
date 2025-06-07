@@ -289,6 +289,7 @@ setInterval(detectPose, 120);
 // --- Animation ---
 function drawLines() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   // Линии между видимыми агентами
   ctx.save();
   ctx.strokeStyle = 'rgba(255,255,255,0.7)';
