@@ -145,6 +145,9 @@ cocoSsd.load().then(model => {
   setInterval(updateTargets, 120); // оптимальная частота
 });
 
+// Включаем WebGL backend для TensorFlow.js
+if (window.tf && tf.setBackend) tf.setBackend('webgl');
+
 // --- Animation ---
 function draw() {
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -180,40 +183,39 @@ function draw() {
     ctx.strokeRect(agent.x, agent.y, AGENT_SIZE, AGENT_SIZE);
   }
   ctx.restore();
-  // (опционально) показать цели
-  // for (const t of detectedTargets) {
-  //   ctx.beginPath();
-  //   ctx.arc(t.x, t.y, 8, 0, 2*Math.PI);
-  //   ctx.strokeStyle = 'red';
-  //   ctx.stroke();
-  // }
+  // Показываем все найденные цели (detectedTargets) красными кружками
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'red';
+  for (const t of detectedTargets) {
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, 7, 0, 2*Math.PI);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function animate() {
-  // Распределяем агентов по объектам
-  let targets = detectedTargets.length > 0 ? detectedTargets : null;
+  // Распределяем агентов по landmark-ам руки, если они есть
+  let handLandmarks = (handsResults && handsResults.length >= 5) ? handsResults : null;
+  let targets = null;
+  if (handLandmarks) {
+    targets = handLandmarks;
+  } else if (detectedTargets.length > 0) {
+    targets = detectedTargets;
+  }
   let now = performance.now();
   let dt = (typeof animate.lastTime === 'number') ? (now - animate.lastTime) / 1000 : 0.016;
   animate.lastTime = now;
 
-  if (targets) {
-    // Группируем агентов по объектам
-    let perObj = Math.floor(agents.length / targets.length);
-    let extra = agents.length % targets.length;
-    let idx = 0;
-    for (let t = 0; t < targets.length; t++) {
-      let n = perObj + (t < extra ? 1 : 0);
-      for (let k = 0; k < n; k++, idx++) {
-        // Для каждого агента вокруг объекта — размещаем по кругу
-        let angle = (2 * Math.PI * k) / n;
-        let radius = 30 + 10 * (k % 3);
-        let tx = targets[t].x + Math.cos(angle) * radius;
-        let ty = targets[t].y + Math.sin(angle) * radius;
-        agents[idx].moveSmart({x: tx, y: ty}, dt, agents);
-      }
+  if (targets && targets.length > 0) {
+    // Если целей мало, часть агентов двигается хаотично
+    let n = Math.min(targets.length, agents.length);
+    for (let i = 0; i < n; i++) {
+      agents[i].moveSmart(targets[i], dt, agents);
     }
-    for (; idx < agents.length; idx++) {
-      agents[idx].moveSmart(null, dt, agents);
+    for (let i = n; i < agents.length; i++) {
+      agents[i].moveSmart(null, dt, agents);
     }
   } else {
     for (let i = 0; i < agents.length; i++) {
