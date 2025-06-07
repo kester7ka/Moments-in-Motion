@@ -22,7 +22,6 @@ navigator.mediaDevices.getUserMedia({video: { facingMode: { exact: 'environment'
 // --- Agent (square) setup ---
 const AGENT_SIZE = 10;
 const AGENT_COUNT = 100;
-const AGENT_SPEED = 60; // px/sec
 const LINK_DIST = 80;
 
 class Agent {
@@ -31,48 +30,20 @@ class Agent {
     this.y = Math.random() * (canvas.height - AGENT_SIZE);
     this.vx = 0;
     this.vy = 0;
-    this.stuck = false;
   }
-  move(dt, targets) {
-    if (this.stuck) return;
-    let tx = null, ty = null;
-    if (targets && targets.length > 0) {
-      // Найти ближайшую цель
-      let minDist = Infinity;
-      for (const t of targets) {
-        const dx = t.x - this.x, dy = t.y - this.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < minDist) {
-          minDist = dist;
-          tx = t.x; ty = t.y;
-        }
-      }
-    }
-    if (tx !== null && ty !== null) {
-      // Двигаться к цели
-      const dx = tx - this.x, dy = ty - this.y;
-      const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist > 1) {
-        this.vx = (dx / dist) * AGENT_SPEED;
-        this.vy = (dy / dist) * AGENT_SPEED;
-      } else {
-        this.vx = 0; this.vy = 0;
-      }
+  moveInstant(target) {
+    if (target) {
+      this.x = target.x - AGENT_SIZE/2;
+      this.y = target.y - AGENT_SIZE/2;
     } else {
-      // Случайное движение
-      if (Math.abs(this.vx) < 1 && Math.abs(this.vy) < 1) {
-        const angle = Math.random() * 2 * Math.PI;
-        this.vx = Math.cos(angle) * AGENT_SPEED * 0.5;
-        this.vy = Math.sin(angle) * AGENT_SPEED * 0.5;
-      }
+      // хаотичное движение
+      this.x += (Math.random() - 0.5) * 10;
+      this.y += (Math.random() - 0.5) * 10;
+      if (this.x < 0) this.x = 0;
+      if (this.x > canvas.width - AGENT_SIZE) this.x = canvas.width - AGENT_SIZE;
+      if (this.y < 0) this.y = 0;
+      if (this.y > canvas.height - AGENT_SIZE) this.y = canvas.height - AGENT_SIZE;
     }
-    this.x += this.vx * dt;
-    this.y += this.vy * dt;
-    // Отскок от краёв
-    if (this.x < 0) { this.x = 0; this.vx *= -1; }
-    if (this.x > canvas.width - AGENT_SIZE) { this.x = canvas.width - AGENT_SIZE; this.vx *= -1; }
-    if (this.y < 0) { this.y = 0; this.vy *= -1; }
-    if (this.y > canvas.height - AGENT_SIZE) { this.y = canvas.height - AGENT_SIZE; this.vy *= -1; }
   }
   center() {
     return {x: this.x + AGENT_SIZE/2, y: this.y + AGENT_SIZE/2};
@@ -80,20 +51,64 @@ class Agent {
 }
 const agents = Array.from({length: AGENT_COUNT}, () => new Agent());
 
-// --- Object detection (COCO-SSD) ---
+// --- Object detection (COCO-SSD) + MediaPipe Hands ---
 let detectedTargets = [];
 let cocoModel = null;
+let hands = null;
+let handsResults = [];
+
+// MediaPipe Hands setup
+function setupHands() {
+  hands = new window.Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.5
+  });
+  hands.onResults((results) => {
+    handsResults = [];
+    if (results.multiHandLandmarks) {
+      for (const landmarks of results.multiHandLandmarks) {
+        for (const lm of landmarks) {
+          handsResults.push({
+            x: lm.x * canvas.width,
+            y: lm.y * canvas.height
+          });
+        }
+      }
+    }
+  });
+}
+setupHands();
+
+async function detectHands() {
+  if (video.videoWidth && video.videoHeight && hands) {
+    await hands.send({image: video});
+  }
+}
+
+// COCO-SSD
 async function detectObjects() {
   if (!cocoModel || !video.videoWidth || !video.videoHeight) return;
   const predictions = await cocoModel.detect(video);
-  detectedTargets = predictions.map(obj => ({
+  return predictions.map(obj => ({
     x: obj.bbox[0] + obj.bbox[2]/2,
     y: obj.bbox[1] + obj.bbox[3]/2
   }));
 }
+
+// Объединяем все цели
+async function updateTargets() {
+  const cocoTargets = await detectObjects() || [];
+  await detectHands();
+  detectedTargets = [...cocoTargets, ...handsResults];
+}
 cocoSsd.load().then(model => {
   cocoModel = model;
-  setInterval(detectObjects, 200);
+  setInterval(updateTargets, 200);
 });
 
 // --- Animation ---
@@ -137,15 +152,20 @@ function draw() {
   //   ctx.stroke();
   // }
 }
-let lastTime = performance.now();
-function animate(now) {
-  const dt = Math.min((now - lastTime) / 1000, 0.05);
-  lastTime = now;
-  for (const agent of agents) agent.move(dt, detectedTargets);
+
+function animate() {
+  // Равномерно распределяем агентов по целям
+  let targets = detectedTargets.length > 0 ? detectedTargets : null;
+  for (let i = 0; i < agents.length; i++) {
+    let target = null;
+    if (targets) {
+      target = targets[i % targets.length];
+    }
+    agents[i].moveInstant(target);
+  }
   draw();
   requestAnimationFrame(animate);
 }
 video.addEventListener('playing', () => {
-  lastTime = performance.now();
   requestAnimationFrame(animate);
 }); 
