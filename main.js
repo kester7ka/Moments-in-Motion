@@ -1,4 +1,3 @@
-// Получаем элементы
 const video = document.getElementById('video');
 const canvas = document.getElementById('overlay');
 const ctx = canvas.getContext('2d');
@@ -11,26 +10,75 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-// Запуск камеры
-navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-  .then(stream => {
-    video.srcObject = stream;
-  })
-  .catch(err => {
-    alert('Не удалось получить доступ к камере: ' + err);
-  });
+let currentFacing = 'user'; // 'user' (front) или 'environment' (back)
+let stream = null;
+
+function startCamera(facingMode = 'user') {
+  if (stream) {
+    stream.getTracks().forEach(track => track.stop());
+  }
+  navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio: false })
+    .then(s => {
+      stream = s;
+      video.srcObject = stream;
+    })
+    .catch(err => {
+      alert('Не удалось получить доступ к камере: ' + err);
+    });
+}
+
+startCamera(currentFacing);
+
+// Обработка двойного тапа
+let lastTap = 0;
+window.addEventListener('touchend', function(e) {
+  const now = Date.now();
+  if (now - lastTap < 300) {
+    // Двойной тап
+    currentFacing = currentFacing === 'user' ? 'environment' : 'user';
+    startCamera(currentFacing);
+  }
+  lastTap = now;
+});
+// Для ПК — двойной клик мышью
+window.addEventListener('dblclick', function(e) {
+  currentFacing = currentFacing === 'user' ? 'environment' : 'user';
+  startCamera(currentFacing);
+});
 
 // Класс для прямоугольника
 class MovingRect {
   constructor() {
     this.randomize();
+    this.target = {x: this.x, y: this.y};
+    this.speed = 30 + Math.random() * 40; // пикселей в секунду
   }
   randomize() {
-    this.width = Math.random() * 80 + 40; // 40-120px
-    this.height = Math.random() * 80 + 40; // 40-120px
+    this.width = Math.random() * 80 + 40;
+    this.height = Math.random() * 80 + 40;
     this.x = Math.random() * (canvas.width - this.width);
     this.y = Math.random() * (canvas.height - this.height);
-    this.color = 'rgba(120,120,120,0.7)'; // Серый
+    this.color = 'rgba(120,120,120,0.7)';
+    this.setNewTarget();
+  }
+  setNewTarget() {
+    this.target = {
+      x: Math.random() * (canvas.width - this.width),
+      y: Math.random() * (canvas.height - this.height)
+    };
+    this.speed = 1000 + Math.random() * 500; // Очень быстро
+  }
+  move(dt) {
+    const dx = this.target.x - this.x;
+    const dy = this.target.y - this.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist < 10) {
+      this.setNewTarget();
+      return;
+    }
+    const moveDist = Math.min(dist, this.speed * dt);
+    this.x += dx / dist * moveDist;
+    this.y += dy / dist * moveDist;
   }
   draw(ctx) {
     ctx.strokeStyle = this.color;
@@ -54,7 +102,10 @@ function randomizeRects() {
 setInterval(randomizeRects, 300); // Резко меняем положение и размер
 
 // Анимация
-function animate() {
+let lastTime = performance.now();
+function animate(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.05); // секунды
+  lastTime = now;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   // Соединяем центры линиями
   ctx.save();
@@ -71,10 +122,11 @@ function animate() {
     }
   }
   ctx.restore();
-  // Рисуем прямоугольники
+  // Двигаем и рисуем прямоугольники
   for (const r of rects) {
+    r.move(dt);
     r.draw(ctx);
   }
   requestAnimationFrame(animate);
 }
-animate(); 
+requestAnimationFrame(animate); 
