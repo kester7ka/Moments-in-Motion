@@ -24,15 +24,36 @@
       width: 100vw;
       height: 100vh;
       background: #000;
+      z-index: 1;
+    }
+    #agents {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .agent {
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 60% 40%, #fff 60%, #aaf 100%);
+      box-shadow: 0 0 18px 6px #fff, 0 0 40px 10px #aaf;
+      border: 2px solid #fff;
+      transition: left 0.18s cubic-bezier(.4,1.6,.6,1), top 0.18s cubic-bezier(.4,1.6,.6,1), opacity 0.2s;
+      opacity: 0.95;
+      will-change: left, top, opacity;
     }
   </style>
 </head>
 <body>
 <canvas id="canvas"></canvas>
+<div id="agents"></div>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.18.0/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 <script src="main.js"></script>
 </body>
-</html> 
+</html>
