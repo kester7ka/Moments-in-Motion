@@ -300,6 +300,18 @@ function draw() {
     ctx.restore();
   }
   ctx.restore();
+  // Временно: landmark-и руки (синие кружки) для отладки
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'blue';
+  if (handsResults && handsResults.length > 0) {
+    for (const lm of handsResults) {
+      ctx.beginPath();
+      ctx.arc(lm.x, lm.y, 6, 0, 2*Math.PI);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
 }
 
 function animate() {
@@ -354,4 +366,4 @@ video.addEventListener('playing', () => {
   requestAnimationFrame(animate);
 });
 
-window.addEventListener('resize', resizeCanvasToDisplaySize); 
+window.addEventListener('resize', resizeCanvasToDisplaySize);
