@@ -316,18 +316,6 @@ function draw() {
     ctx.restore();
   }
   ctx.restore();
-  // Landmark-и руки (синие кружки) для отладки (масштабируем по W/H и object-fit: cover)
-  ctx.save();
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = 'blue';
-  if (handsResults && handsResults.length > 0) {
-    for (const lm of handsResults) {
-      ctx.beginPath();
-      ctx.arc(offsetX + lm.x * W * scale, offsetY + lm.y * H * scale, 6 * scale, 0, 2*Math.PI);
-      ctx.fill();
-    }
-  }
-  ctx.restore();
 }
 
 function animate() {
