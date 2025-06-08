@@ -21,8 +21,8 @@ navigator.mediaDevices.getUserMedia({video: { facingMode: 'environment' }, audio
 // Retina canvas
 function resizeCanvasToDisplaySize() {
   const dpr = window.devicePixelRatio || 1;
-  const width = Math.round(W);
-  const height = Math.round(H);
+  const width = Math.round(window.innerWidth);
+  const height = Math.round(window.innerHeight);
   if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
     canvas.width = width * dpr;
     canvas.height = height * dpr;
@@ -227,8 +227,11 @@ video.addEventListener('play', () => {
 // --- Animation ---
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(video, 0, 0, W, H);
-  // Линии — белые, сглаженные (ретина)
+  // object-fit: cover для видео
+  const winW = window.innerWidth, winH = window.innerHeight;
+  const {scale, offsetX, offsetY} = getCoverTransform(W, H, winW, winH);
+  ctx.drawImage(video, 0, 0, W, H, offsetX, offsetY, W * scale, H * scale);
+  // Линии
   ctx.save();
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 1.5;
@@ -256,18 +259,26 @@ function draw() {
           const curveAmount = Math.min(16, dist/2.5);
           const cx = mx + (perp.x / norm) * curveAmount;
           const cy = my + (perp.y / norm) * curveAmount;
-          ctx.moveTo(ca.x, ca.y);
-          ctx.quadraticCurveTo(cx, cy, cb.x, cb.y);
+          ctx.moveTo(
+            offsetX + ca.x * scale,
+            offsetY + ca.y * scale
+          );
+          ctx.quadraticCurveTo(
+            offsetX + cx * scale,
+            offsetY + cy * scale,
+            offsetX + cb.x * scale,
+            offsetY + cb.y * scale
+          );
         } else {
-          ctx.moveTo(ca.x, ca.y);
-          ctx.lineTo(cb.x, cb.y);
+          ctx.moveTo(offsetX + ca.x * scale, offsetY + ca.y * scale);
+          ctx.lineTo(offsetX + cb.x * scale, offsetY + cb.y * scale);
         }
         ctx.stroke();
       }
     }
   }
   ctx.restore();
-  // Квадраты — максимально белые, без пикселизации, тонкая, но чёткая обводка
+  // Квадраты
   ctx.save();
   ctx.strokeStyle = '#fff';
   ctx.shadowBlur = 0;
@@ -275,18 +286,23 @@ function draw() {
   ctx.globalAlpha = 1;
   for (const agent of agents) {
     if (!agent.visible) continue;
-    ctx.strokeRect(Math.round(agent.x)+0.5, Math.round(agent.y)+0.5, AGENT_SIZE, AGENT_SIZE);
+    ctx.strokeRect(
+      Math.round(offsetX + agent.x * scale) + 0.5,
+      Math.round(offsetY + agent.y * scale) + 0.5,
+      AGENT_SIZE * scale,
+      AGENT_SIZE * scale
+    );
   }
   ctx.restore();
-  // Координаты — 10px, жирный, белый, с тенью, чуть меньше
+  // Координаты
   ctx.save();
-  ctx.font = 'bold 10px monospace';
+  ctx.font = `bold ${Math.round(10 * scale)}px monospace`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   for (const agent of agents) {
     if (!agent.visible) continue;
-    const cx = agent.x + AGENT_SIZE/2;
-    const cy = agent.y + AGENT_SIZE + 2;
+    const cx = offsetX + (agent.x + AGENT_SIZE/2) * scale;
+    const cy = offsetY + (agent.y + AGENT_SIZE) * scale + 2;
     const text = `${Math.round(agent.x)},${Math.round(agent.y)}`;
     ctx.save();
     ctx.fillStyle = '#000';
@@ -300,22 +316,16 @@ function draw() {
     ctx.restore();
   }
   ctx.restore();
-  // Временно: landmark-и руки (синие кружки) для отладки (масштабируем по W/H)
+  // Landmark-и руки (синие кружки) для отладки (масштабируем по W/H и object-fit: cover)
   ctx.save();
   ctx.globalAlpha = 1;
   ctx.fillStyle = 'blue';
   if (handsResults && handsResults.length > 0) {
     for (const lm of handsResults) {
       ctx.beginPath();
-      ctx.arc(lm.x * W, lm.y * H, 6, 0, 2*Math.PI);
+      ctx.arc(offsetX + lm.x * W * scale, offsetY + lm.y * H * scale, 6 * scale, 0, 2*Math.PI);
       ctx.fill();
     }
-    // Отладочный текст: размеры и первая landmark
-    ctx.font = 'bold 12px monospace';
-    ctx.fillStyle = 'yellow';
-    ctx.fillText(`video: ${video.videoWidth}x${video.videoHeight} canvas: ${canvas.width}x${canvas.height} W:${W} H:${H}`, 120, 20);
-    const lm0 = handsResults[0];
-    ctx.fillText(`lm0: ${Math.round(lm0.x*W)},${Math.round(lm0.y*H)}`, 120, 40);
   }
   ctx.restore();
 }
@@ -372,4 +382,23 @@ video.addEventListener('playing', () => {
   requestAnimationFrame(animate);
 });
 
-window.addEventListener('resize', resizeCanvasToDisplaySize); 
+window.addEventListener('resize', resizeCanvasToDisplaySize);
+
+// --- Object-fit: cover utils ---
+function getCoverTransform(srcW, srcH, dstW, dstH) {
+  const srcRatio = srcW / srcH;
+  const dstRatio = dstW / dstH;
+  let scale, offsetX, offsetY;
+  if (srcRatio > dstRatio) {
+    // Источник шире — crop по ширине
+    scale = dstH / srcH;
+    offsetX = (dstW - srcW * scale) / 2;
+    offsetY = 0;
+  } else {
+    // Источник выше — crop по высоте
+    scale = dstW / srcW;
+    offsetX = 0;
+    offsetY = (dstH - srcH * scale) / 2;
+  }
+  return {scale, offsetX, offsetY};
+} 
