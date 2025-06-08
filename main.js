@@ -300,16 +300,22 @@ function draw() {
     ctx.restore();
   }
   ctx.restore();
-  // Временно: landmark-и руки (синие кружки) для отладки
+  // Временно: landmark-и руки (синие кружки) для отладки (масштабируем по W/H)
   ctx.save();
   ctx.globalAlpha = 1;
   ctx.fillStyle = 'blue';
   if (handsResults && handsResults.length > 0) {
     for (const lm of handsResults) {
       ctx.beginPath();
-      ctx.arc(lm.x, lm.y, 6, 0, 2*Math.PI);
+      ctx.arc(lm.x * W, lm.y * H, 6, 0, 2*Math.PI);
       ctx.fill();
     }
+    // Отладочный текст: размеры и первая landmark
+    ctx.font = 'bold 12px monospace';
+    ctx.fillStyle = 'yellow';
+    ctx.fillText(`video: ${video.videoWidth}x${video.videoHeight} canvas: ${canvas.width}x${canvas.height} W:${W} H:${H}`, 120, 20);
+    const lm0 = handsResults[0];
+    ctx.fillText(`lm0: ${Math.round(lm0.x*W)},${Math.round(lm0.y*H)}`, 120, 40);
   }
   ctx.restore();
 }
@@ -366,4 +372,4 @@ video.addEventListener('playing', () => {
   requestAnimationFrame(animate);
 });
 
-window.addEventListener('resize', resizeCanvasToDisplaySize);
+window.addEventListener('resize', resizeCanvasToDisplaySize); 
