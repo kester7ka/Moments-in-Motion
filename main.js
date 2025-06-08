@@ -293,27 +293,6 @@ function draw() {
     ctx.strokeRect(agent.x, agent.y, AGENT_SIZE, AGENT_SIZE);
   }
   ctx.restore();
-  // Визуализация bbox-ов (зелёные прямоугольники) только для предметов (не людей)
-  ctx.save();
-  ctx.strokeStyle = 'lime';
-  ctx.lineWidth = 2;
-  for (let i = 0; i < detectedBboxes.length; i++) {
-    // Если есть поза и bbox пересекается с человеком — не рисуем
-    let skip = false;
-    for (const pose of detectedPoses) {
-      if (pose.keypoints && pose.keypoints.length > 0) {
-        for (const kp of pose.keypoints) {
-          if (kp.x >= detectedBboxes[i][0] && kp.x <= detectedBboxes[i][0]+detectedBboxes[i][2] &&
-              kp.y >= detectedBboxes[i][1] && kp.y <= detectedBboxes[i][1]+detectedBboxes[i][3]) {
-            skip = true;
-            break;
-          }
-        }
-      }
-    }
-    if (!skip) ctx.strokeRect(detectedBboxes[i][0], detectedBboxes[i][1], detectedBboxes[i][2], detectedBboxes[i][3]);
-  }
-  ctx.restore();
   // Визуализация скелета человека (суставы и кости)
   ctx.save();
   ctx.strokeStyle = '#0ff';
