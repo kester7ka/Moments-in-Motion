@@ -215,81 +215,6 @@ video.addEventListener('play', () => {
   requestAnimationFrame(checkVideoFrame);
 });
 
-// --- Color clustering and bbox by color ---
-const GRID_SIZE = 20;
-const COLOR_THRESHOLD = 40; // чем меньше, тем строже группировка по цвету
-function colorDist(a, b) {
-  return Math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2);
-}
-function groupColorBoxes(grid) {
-  const groups = [];
-  for (const cell of grid) {
-    let found = false;
-    for (const group of groups) {
-      if (colorDist(cell.rgb, group.rgb) < COLOR_THRESHOLD) {
-        group.cells.push(cell);
-        // обновим средний цвет группы
-        group.rgb[0] = Math.round((group.rgb[0]*group.cells.length + cell.rgb[0])/(group.cells.length+1));
-        group.rgb[1] = Math.round((group.rgb[1]*group.cells.length + cell.rgb[1])/(group.cells.length+1));
-        group.rgb[2] = Math.round((group.rgb[2]*group.cells.length + cell.rgb[2])/(group.cells.length+1));
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      groups.push({rgb: [...cell.rgb], color: cell.color, cells: [cell]});
-    }
-  }
-  // Для каждой группы строим bbox
-  for (const group of groups) {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const cell of group.cells) {
-      minX = Math.min(minX, cell.x);
-      minY = Math.min(minY, cell.y);
-      maxX = Math.max(maxX, cell.x);
-      maxY = Math.max(maxY, cell.y);
-    }
-    group.bbox = [minX, minY, maxX-minX, maxY-minY];
-  }
-  return groups;
-}
-
-// --- Color grid analysis ---
-function getColorGrid() {
-  const w = canvas.width, h = canvas.height;
-  const cellW = Math.floor(w / GRID_SIZE);
-  const cellH = Math.floor(h / GRID_SIZE);
-  const imgData = ctx.getImageData(0, 0, w, h).data;
-  const grid = [];
-  for (let gy = 0; gy < GRID_SIZE; gy++) {
-    for (let gx = 0; gx < GRID_SIZE; gx++) {
-      let r = 0, g = 0, b = 0, count = 0;
-      for (let y = gy * cellH; y < (gy+1)*cellH; y++) {
-        for (let x = gx * cellW; x < (gx+1)*cellW; x++) {
-          const idx = (y * w + x) * 4;
-          r += imgData[idx];
-          g += imgData[idx+1];
-          b += imgData[idx+2];
-          count++;
-        }
-      }
-      r = Math.round(r / count);
-      g = Math.round(g / count);
-      b = Math.round(b / count);
-      grid.push({
-        x: gx * cellW + cellW/2,
-        y: gy * cellH + cellH/2,
-        color: rgbToHex(r, g, b),
-        rgb: [r, g, b]
-      });
-    }
-  }
-  return grid;
-}
-function rgbToHex(r, g, b) {
-  return '#' + [r,g,b].map(x => x.toString(16).padStart(2,'0')).join('');
-}
-
 // --- Animation ---
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -333,7 +258,7 @@ function draw() {
     }
   }
   ctx.restore();
-  // Квадраты и подписи
+  // Квадраты — максимально чёткие, белые, без закруглений, тонкая обводка
   ctx.save();
   ctx.strokeStyle = '#fff';
   ctx.shadowBlur = 0;
@@ -345,10 +270,10 @@ function draw() {
   for (const agent of agents) {
     if (!agent.visible) continue;
     ctx.strokeRect(Math.round(agent.x)+0.5, Math.round(agent.y)+0.5, AGENT_SIZE, AGENT_SIZE);
-    // Цвет под агентом
+    // Координаты под агентом
     const cx = agent.x + AGENT_SIZE/2;
     const cy = agent.y + AGENT_SIZE + 2;
-    const text = agent.color || '#------';
+    const text = `${Math.round(agent.x)},${Math.round(agent.y)}`;
     // Тень для читаемости
     ctx.save();
     ctx.fillStyle = '#000';
@@ -365,10 +290,7 @@ function draw() {
 }
 
 function animate() {
-  // Анализируем цвета
-  let colorGrid = getColorGrid();
-  let colorGroups = groupColorBoxes(colorGrid);
-  // Landmark-ы руки
+  // Распределяем агентов по landmark-ам руки, если они есть
   let handLandmarks = (handsResults && handsResults.length >= 5) ? handsResults : null;
   let now = performance.now();
   let targetFps = Math.max(30, Math.min(60, Math.round(measuredVideoFps)));
@@ -385,48 +307,41 @@ function animate() {
     for (let i = 0; i < n; i++, used++) {
       agents[used].moveSmart(handLandmarks[i], dt, agents);
       agents[used].visible = true;
-      // Цвет в точке landmark
-      const px = Math.round(handLandmarks[i].x);
-      const py = Math.round(handLandmarks[i].y);
-      const imgData = ctx.getImageData(px, py, 1, 1).data;
-      agents[used].color = rgbToHex(imgData[0], imgData[1], imgData[2]);
     }
-  }
-  // Остальные агенты — по цветовым боксам
-  for (let g = 0; used < agents.length && g < colorGroups.length; g++) {
-    const group = colorGroups[g];
-    // Распределяем агентов по периметру bbox группы
-    const n = Math.min(MAX_AGENTS_PER_TARGET, agents.length - used);
-    if (n <= 0) break;
-    const [x, y, w, h] = group.bbox;
-    const perim = 2 * (w + h);
-    for (let k = 0; k < n && used < agents.length; k++, used++) {
-      let p = (perim * k) / n;
-      let tx, ty;
-      if (p < w) { // верхняя грань
-        tx = x + p;
-        ty = y;
-      } else if (p < w + h) { // правая грань
-        tx = x + w;
-        ty = y + (p - w);
-      } else if (p < w + h + w) { // нижняя грань
-        tx = x + w - (p - w - h);
-        ty = y + h;
-      } else { // левая грань
-        tx = x;
-        ty = y + h - (p - w - h - w);
+  } else if (detectedTargets.length > 0 && detectedBboxes.length === detectedTargets.length) {
+    // Для bbox-целей (объекты) — агенты по периметру bbox
+    for (let t = 0; t < detectedTargets.length; t++) {
+      let bbox = detectedBboxes[t];
+      let n = Math.min(MAX_AGENTS_PER_TARGET, agents.length - used);
+      if (n <= 0) break;
+      // Периметр прямоугольника
+      let perim = 2 * (bbox[2] + bbox[3]);
+      for (let k = 0; k < n; k++, used++) {
+        let p = (perim * k) / n;
+        let tx, ty;
+        if (p < bbox[2]) { // верхняя грань
+          tx = bbox[0] + p;
+          ty = bbox[1];
+        } else if (p < bbox[2] + bbox[3]) { // правая грань
+          tx = bbox[0] + bbox[2];
+          ty = bbox[1] + (p - bbox[2]);
+        } else if (p < bbox[2] + bbox[3] + bbox[2]) { // нижняя грань
+          tx = bbox[0] + bbox[2] - (p - bbox[2] - bbox[3]);
+          ty = bbox[1] + bbox[3];
+        } else { // левая грань
+          tx = bbox[0];
+          ty = bbox[1] + bbox[3] - (p - bbox[2] - bbox[3] - bbox[2]);
+        }
+        agents[used].moveSmart({x: tx, y: ty}, dt, agents);
+        agents[used].visible = true;
       }
-      agents[used].moveSmart({x: tx, y: ty}, dt, agents);
-      agents[used].visible = true;
-      agents[used].color = group.color;
     }
   }
-  // Остальные скрываем
+  // Остальные агенты скрываем (перемещаем за пределы canvas)
   for (; used < agents.length; used++) {
     agents[used].x = -1000;
     agents[used].y = -1000;
     agents[used].visible = false;
-    agents[used].color = '';
   }
   draw();
   requestAnimationFrame(animate);
