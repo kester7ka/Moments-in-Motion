@@ -1,22 +1,28 @@
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 let W, H;
+const DPR = window.devicePixelRatio || 1;
 
 const video = document.createElement('video');
 video.autoplay = true;
 video.playsInline = true;
 video.style.display = 'none';
 
+function resizeCanvasToVideo() {
+  W = video.videoWidth;
+  H = video.videoHeight;
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+
 navigator.mediaDevices.getUserMedia({video: { facingMode: 'environment' }, audio: false})
   .then(stream => {
     video.srcObject = stream;
     video.onloadedmetadata = () => {
-      W = video.videoWidth;
-      H = video.videoHeight;
-      canvas.width = W;
-      canvas.height = H;
-      // canvas.style.width = W + 'px';
-      // canvas.style.height = H + 'px';
+      resizeCanvasToVideo();
     };
   })
   .catch(e => alert('Нет доступа к камере: ' + e));
@@ -218,7 +224,7 @@ video.addEventListener('play', () => {
 // --- Animation ---
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(video, 0, 0, W, H);
   // Линии — белые, изогнутые если близко, прямые если далеко
   ctx.save();
   ctx.strokeStyle = '#fff';
@@ -264,7 +270,7 @@ function draw() {
   ctx.shadowBlur = 0;
   ctx.lineWidth = 1.5;
   ctx.globalAlpha = 1;
-  ctx.font = '12px monospace';
+  ctx.font = '9px Menlo, Consolas, monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   for (const agent of agents) {
