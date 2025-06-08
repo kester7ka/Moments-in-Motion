@@ -37,10 +37,11 @@ function resizeCanvasToDisplaySize() {
 const AGENT_SIZE = 10;
 const AGENT_COUNT = 50;
 const LINK_DIST = 80;
-const AGENT_SPEED = 400; // px/sec, плавно
+const AGENT_SPEED = 2000; // px/sec, очень быстро
 const AGENT_REPEL_DIST = 18; // минимальное расстояние между агентами
 const AGENT_REPEL_FORCE = 4000; // сила отталкивания
 const MAX_AGENTS_PER_TARGET = 15;
+const AGENT_SMOOTH_ALPHA = 0.13; // коэффициент плавности (0.1-0.2 — очень плавно)
 
 class Agent {
   constructor() {
@@ -52,8 +53,6 @@ class Agent {
     this.visible = true;
   }
   moveSmart(target, dt, agents) {
-    let fx = 0, fy = 0;
-    // Притяжение к цели (плавно, без телепортации)
     if (target) {
       const tx = target.x - AGENT_SIZE/2;
       const ty = target.y - AGENT_SIZE/2;
@@ -61,7 +60,6 @@ class Agent {
       const dy = ty - this.y;
       const dist = Math.sqrt(dx*dx + dy*dy);
       if (dist > 1) {
-        // Плавное движение: ограничиваем максимальное перемещение за кадр
         const maxStep = AGENT_SPEED * dt;
         if (dist < maxStep) {
           this.x = tx;
@@ -72,9 +70,8 @@ class Agent {
         }
       }
     } else {
-      // хаотичное движение
-      fx += (Math.random() - 0.5) * 200;
-      fy += (Math.random() - 0.5) * 200;
+      let fx = (Math.random() - 0.5) * 200;
+      let fy = (Math.random() - 0.5) * 200;
       const len = Math.sqrt(fx*fx + fy*fy);
       if (len > AGENT_SPEED) {
         fx = fx / len * AGENT_SPEED;
@@ -175,7 +172,7 @@ async function updateTargets() {
 }
 cocoSsd.load().then(model => {
   cocoModel = model;
-  setInterval(updateTargets, 180); // оптимальная частота
+  setInterval(updateTargets, 120); // чуть чаще для лучшего распознавания руки
 });
 
 // --- TensorFlow.js backend selection ---
