@@ -128,8 +128,8 @@ function setupHands() {
       for (const landmarks of results.multiHandLandmarks) {
         for (const lm of landmarks) {
           handsResults.push({
-            x: lm.x * canvas.width,
-            y: lm.y * canvas.height
+            x: lm.x, // относительные координаты (0..1)
+            y: lm.y
           });
         }
       }
@@ -331,7 +331,9 @@ function draw() {
 }
 
 function animate() {
-  let handLandmarks = (handsResults && handsResults.length >= 5) ? handsResults : null;
+  let handLandmarks = (handsResults && handsResults.length >= 5)
+    ? handsResults.map(lm => ({x: lm.x * W, y: lm.y * H}))
+    : null;
   let now = performance.now();
   let targetFps = Math.max(30, Math.min(60, Math.round(measuredVideoFps)));
   let dt = 1 / targetFps;
