@@ -219,7 +219,7 @@ video.addEventListener('play', () => {
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  // Линии — белые, изогнутые (квадратичные кривые), сглаживание по умолчанию
+  // Линии — белые, изогнутые если близко, прямые если далеко
   ctx.save();
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 1.5;
@@ -237,30 +237,54 @@ function draw() {
       const dist = Math.sqrt(dx*dx + dy*dy);
       if (dist < LINK_DIST) {
         ctx.beginPath();
-        // Квадратичная кривая: контрольная точка — середина между агентами, смещённая перпендикулярно
-        const mx = (ca.x + cb.x) / 2;
-        const my = (ca.y + cb.y) / 2;
-        const perp = {x: -(cb.y - ca.y), y: cb.x - ca.x};
-        const norm = Math.sqrt(perp.x*perp.x + perp.y*perp.y) || 1;
-        const curveAmount = Math.min(20, dist/3);
-        const cx = mx + (perp.x / norm) * curveAmount;
-        const cy = my + (perp.y / norm) * curveAmount;
-        ctx.moveTo(ca.x, ca.y);
-        ctx.quadraticCurveTo(cx, cy, cb.x, cb.y);
+        if (dist < 60) {
+          // Изогнутая линия (квадратичная кривая)
+          const mx = (ca.x + cb.x) / 2;
+          const my = (ca.y + cb.y) / 2;
+          const perp = {x: -(cb.y - ca.y), y: cb.x - ca.x};
+          const norm = Math.sqrt(perp.x*perp.x + perp.y*perp.y) || 1;
+          const curveAmount = Math.min(16, dist/2.5);
+          const cx = mx + (perp.x / norm) * curveAmount;
+          const cy = my + (perp.y / norm) * curveAmount;
+          ctx.moveTo(ca.x, ca.y);
+          ctx.quadraticCurveTo(cx, cy, cb.x, cb.y);
+        } else {
+          // Прямая линия
+          ctx.moveTo(ca.x, ca.y);
+          ctx.lineTo(cb.x, cb.y);
+        }
         ctx.stroke();
       }
     }
   }
   ctx.restore();
-  // Квадраты — чёткие, белые, без закруглений, сглаживание по умолчанию
+  // Квадраты — максимально чёткие, белые, без закруглений, тонкая обводка
   ctx.save();
   ctx.strokeStyle = '#fff';
   ctx.shadowBlur = 0;
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 1.5;
   ctx.globalAlpha = 1;
+  ctx.font = '12px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
   for (const agent of agents) {
     if (!agent.visible) continue;
     ctx.strokeRect(Math.round(agent.x)+0.5, Math.round(agent.y)+0.5, AGENT_SIZE, AGENT_SIZE);
+    // Координаты под агентом
+    const cx = agent.x + AGENT_SIZE/2;
+    const cy = agent.y + AGENT_SIZE + 2;
+    const text = `${Math.round(agent.x)},${Math.round(agent.y)}`;
+    // Тень для читаемости
+    ctx.save();
+    ctx.fillStyle = '#000';
+    ctx.globalAlpha = 0.7;
+    ctx.fillText(text, cx+1, cy+1);
+    ctx.restore();
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.globalAlpha = 1;
+    ctx.fillText(text, cx, cy);
+    ctx.restore();
   }
   ctx.restore();
 }
