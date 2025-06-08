@@ -148,18 +148,37 @@ async function detectObjects() {
   }));
 }
 
-// Объединяем все цели
+// --- MoveNet Pose Detection ---
+let poseDetector = null;
+let detectedPoses = [];
+async function setupPose() {
+  poseDetector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+    modelType: 'Lightning',
+    enableSmoothing: true
+  });
+}
+setupPose();
+async function detectPose() {
+  if (!poseDetector || !video.videoWidth || !video.videoHeight) return;
+  const poses = await poseDetector.estimatePoses(video);
+  detectedPoses = poses;
+}
+
+// В updateTargets чередуем: coco, hands, pose
+let detectStep = 0;
 async function updateTargets() {
-  if (detectToggle) {
+  if (detectStep % 3 === 0) {
     const cocoTargets = await detectObjects() || [];
     detectedTargets = cocoTargets;
-  } else {
+  } else if (detectStep % 3 === 1) {
     await detectHands();
     if (handsResults && handsResults.length > 0) {
       detectedTargets = handsResults;
     }
+  } else {
+    await detectPose();
   }
-  detectToggle = !detectToggle;
+  detectStep++;
 }
 cocoSsd.load().then(model => {
   cocoModel = model;
@@ -217,11 +236,21 @@ video.addEventListener('play', () => {
 
 // --- Animation ---
 function draw() {
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  // Линии — ярко-белые
+  // devicePixelRatio для чёткого сглаживания
+  if (canvas.width !== W * window.devicePixelRatio || canvas.height !== H * window.devicePixelRatio) {
+    canvas.width = W * window.devicePixelRatio;
+    canvas.height = H * window.devicePixelRatio;
+    ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+  }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(video, 0, 0, W, H);
+  // Линии — тонкие, белые, сглаженные
   ctx.save();
   ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // Прямые линии
   for (let i = 0; i < agents.length; i++) {
     if (!agents[i].visible) continue;
     const a = agents[i];
@@ -240,25 +269,85 @@ function draw() {
       }
     }
   }
+  // Изогнутые линии (кривые Безье между некоторыми агентами)
+  for (let i = 0; i < agents.length-2; i+=3) {
+    if (!agents[i].visible || !agents[i+1].visible || !agents[i+2].visible) continue;
+    const a = agents[i].center();
+    const b = agents[i+1].center();
+    const c = agents[i+2].center();
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.bezierCurveTo(b.x, b.y, b.x, b.y, c.x, c.y);
+    ctx.stroke();
+  }
   ctx.restore();
-  // Квадраты — ярко-белые с glow
+  // Квадраты — тонкие, белые, без тени, без градиента, без закругления
   ctx.save();
   ctx.strokeStyle = '#fff';
-  ctx.shadowColor = '#fff';
-  ctx.shadowBlur = 12;
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 1.2;
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'miter';
   for (const agent of agents) {
     if (!agent.visible) continue;
     ctx.globalAlpha = 1;
     ctx.strokeRect(agent.x, agent.y, AGENT_SIZE, AGENT_SIZE);
   }
   ctx.restore();
-  // Визуализация bbox-ов (зелёные прямоугольники)
+  // Визуализация bbox-ов (зелёные прямоугольники) только для предметов (не людей)
   ctx.save();
   ctx.strokeStyle = 'lime';
   ctx.lineWidth = 2;
-  for (const bbox of detectedBboxes) {
-    ctx.strokeRect(bbox[0], bbox[1], bbox[2], bbox[3]);
+  for (let i = 0; i < detectedBboxes.length; i++) {
+    // Если есть поза и bbox пересекается с человеком — не рисуем
+    let skip = false;
+    for (const pose of detectedPoses) {
+      if (pose.keypoints && pose.keypoints.length > 0) {
+        for (const kp of pose.keypoints) {
+          if (kp.x >= detectedBboxes[i][0] && kp.x <= detectedBboxes[i][0]+detectedBboxes[i][2] &&
+              kp.y >= detectedBboxes[i][1] && kp.y <= detectedBboxes[i][1]+detectedBboxes[i][3]) {
+            skip = true;
+            break;
+          }
+        }
+      }
+    }
+    if (!skip) ctx.strokeRect(detectedBboxes[i][0], detectedBboxes[i][1], detectedBboxes[i][2], detectedBboxes[i][3]);
+  }
+  ctx.restore();
+  // Визуализация скелета человека (суставы и кости)
+  ctx.save();
+  ctx.strokeStyle = '#0ff';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const pose of detectedPoses) {
+    if (pose.keypoints && pose.keypoints.length > 0) {
+      // Кости (связи между суставами)
+      const edges = [
+        [0,1],[1,2],[2,3],[3,4], // правая рука
+        [0,5],[5,6],[6,7],[7,8], // левая рука
+        [5,11],[11,12],[12,6],   // туловище
+        [11,13],[13,15],         // левая нога
+        [12,14],[14,16]          // правая нога
+      ];
+      for (const [a,b] of edges) {
+        if (pose.keypoints[a] && pose.keypoints[b] && pose.keypoints[a].score > 0.3 && pose.keypoints[b].score > 0.3) {
+          ctx.beginPath();
+          ctx.moveTo(pose.keypoints[a].x, pose.keypoints[a].y);
+          ctx.lineTo(pose.keypoints[b].x, pose.keypoints[b].y);
+          ctx.stroke();
+        }
+      }
+      // Суставы
+      for (const kp of pose.keypoints) {
+        if (kp.score > 0.3) {
+          ctx.beginPath();
+          ctx.arc(kp.x, kp.y, 4, 0, 2*Math.PI);
+          ctx.fillStyle = '#fff';
+          ctx.fill();
+        }
+      }
+    }
   }
   ctx.restore();
 }
