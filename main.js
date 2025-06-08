@@ -13,13 +13,25 @@ navigator.mediaDevices.getUserMedia({video: { facingMode: 'environment' }, audio
     video.onloadedmetadata = () => {
       W = video.videoWidth;
       H = video.videoHeight;
-      canvas.width = W;
-      canvas.height = H;
-      // canvas.style.width = W + 'px';
-      // canvas.style.height = H + 'px';
+      resizeCanvasToDisplaySize();
     };
   })
   .catch(e => alert('Нет доступа к камере: ' + e));
+
+// Retina canvas
+function resizeCanvasToDisplaySize() {
+  const dpr = window.devicePixelRatio || 1;
+  const width = Math.round(W);
+  const height = Math.round(H);
+  if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+}
 
 // --- Agent (square) setup ---
 const AGENT_SIZE = 10;
@@ -218,13 +230,14 @@ video.addEventListener('play', () => {
 // --- Animation ---
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  // Линии — белые, изогнутые если близко, прямые если далеко
+  ctx.drawImage(video, 0, 0, W, H);
+  // Линии — белые, сглаженные (ретина)
   ctx.save();
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 1.5;
   ctx.shadowBlur = 0;
   ctx.globalAlpha = 1;
+  ctx.imageSmoothingEnabled = true;
   for (let i = 0; i < agents.length; i++) {
     if (!agents[i].visible) continue;
     const a = agents[i];
@@ -249,7 +262,6 @@ function draw() {
           ctx.moveTo(ca.x, ca.y);
           ctx.quadraticCurveTo(cx, cy, cb.x, cb.y);
         } else {
-          // Прямая линия
           ctx.moveTo(ca.x, ca.y);
           ctx.lineTo(cb.x, cb.y);
         }
@@ -258,23 +270,27 @@ function draw() {
     }
   }
   ctx.restore();
-  // Квадраты — максимально чёткие, белые, без закруглений, тонкая обводка
+  // Квадраты — максимально белые, без пикселизации, тонкая, но чёткая обводка
   ctx.save();
   ctx.strokeStyle = '#fff';
   ctx.shadowBlur = 0;
   ctx.lineWidth = 1.5;
   ctx.globalAlpha = 1;
-  ctx.font = '12px monospace';
+  for (const agent of agents) {
+    if (!agent.visible) continue;
+    ctx.strokeRect(Math.round(agent.x)+0.5, Math.round(agent.y)+0.5, AGENT_SIZE, AGENT_SIZE);
+  }
+  ctx.restore();
+  // Координаты — 10px, жирный, белый, с тенью, чуть меньше
+  ctx.save();
+  ctx.font = 'bold 10px monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   for (const agent of agents) {
     if (!agent.visible) continue;
-    ctx.strokeRect(Math.round(agent.x)+0.5, Math.round(agent.y)+0.5, AGENT_SIZE, AGENT_SIZE);
-    // Координаты под агентом
     const cx = agent.x + AGENT_SIZE/2;
     const cy = agent.y + AGENT_SIZE + 2;
     const text = `${Math.round(agent.x)},${Math.round(agent.y)}`;
-    // Тень для читаемости
     ctx.save();
     ctx.fillStyle = '#000';
     ctx.globalAlpha = 0.7;
@@ -290,62 +306,55 @@ function draw() {
 }
 
 function animate() {
-  // Распределяем агентов по landmark-ам руки, если они есть
   let handLandmarks = (handsResults && handsResults.length >= 5) ? handsResults : null;
   let now = performance.now();
   let targetFps = Math.max(30, Math.min(60, Math.round(measuredVideoFps)));
   let dt = 1 / targetFps;
   animate.lastTime = now;
-
-  // Скрываем всех агентов по умолчанию
   for (const agent of agents) agent.visible = false;
-
   let used = 0;
   if (handLandmarks && handLandmarks.length > 0) {
-    // Landmark-ы руки: максимум по одному агенту на landmark
     let n = Math.min(handLandmarks.length, agents.length);
     for (let i = 0; i < n; i++, used++) {
       agents[used].moveSmart(handLandmarks[i], dt, agents);
       agents[used].visible = true;
     }
   } else if (detectedTargets.length > 0 && detectedBboxes.length === detectedTargets.length) {
-    // Для bbox-целей (объекты) — агенты по периметру bbox
     for (let t = 0; t < detectedTargets.length; t++) {
       let bbox = detectedBboxes[t];
       let n = Math.min(MAX_AGENTS_PER_TARGET, agents.length - used);
       if (n <= 0) break;
-      // Периметр прямоугольника
       let perim = 2 * (bbox[2] + bbox[3]);
       for (let k = 0; k < n; k++, used++) {
         let p = (perim * k) / n;
         let tx, ty;
-        if (p < bbox[2]) { // верхняя грань
-          tx = bbox[0] + p;
-          ty = bbox[1];
-        } else if (p < bbox[2] + bbox[3]) { // правая грань
-          tx = bbox[0] + bbox[2];
-          ty = bbox[1] + (p - bbox[2]);
-        } else if (p < bbox[2] + bbox[3] + bbox[2]) { // нижняя грань
-          tx = bbox[0] + bbox[2] - (p - bbox[2] - bbox[3]);
-          ty = bbox[1] + bbox[3];
-        } else { // левая грань
-          tx = bbox[0];
-          ty = bbox[1] + bbox[3] - (p - bbox[2] - bbox[3] - bbox[2]);
-        }
+        if (p < bbox[2]) { tx = bbox[0] + p; ty = bbox[1]; }
+        else if (p < bbox[2] + bbox[3]) { tx = bbox[0] + bbox[2]; ty = bbox[1] + (p - bbox[2]); }
+        else if (p < bbox[2] + bbox[3] + bbox[2]) { tx = bbox[0] + bbox[2] - (p - bbox[2] - bbox[3]); ty = bbox[1] + bbox[3]; }
+        else { tx = bbox[0]; ty = bbox[1] + bbox[3] - (p - bbox[2] - bbox[3] - bbox[2]); }
         agents[used].moveSmart({x: tx, y: ty}, dt, agents);
         agents[used].visible = true;
       }
     }
   }
-  // Остальные агенты скрываем (перемещаем за пределы canvas)
-  for (; used < agents.length; used++) {
-    agents[used].x = -1000;
-    agents[used].y = -1000;
-    agents[used].visible = false;
+  // Если целей нет — все агенты хаотично двигаются
+  if (used === 0) {
+    for (let i = 0; i < agents.length; i++) {
+      agents[i].moveSmart(null, dt, agents);
+      agents[i].visible = true;
+    }
+  } else {
+    for (; used < agents.length; used++) {
+      agents[used].x = -1000;
+      agents[used].y = -1000;
+      agents[used].visible = false;
+    }
   }
   draw();
   requestAnimationFrame(animate);
 }
 video.addEventListener('playing', () => {
   requestAnimationFrame(animate);
-}); 
+});
+
+window.addEventListener('resize', resizeCanvasToDisplaySize); 
